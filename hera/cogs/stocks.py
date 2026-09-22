@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..config import config
+from ..context import CommandContext, bind_contexts
 from ..errors import HeraError, InsufficientShares
 from ..formatting import money, percent, price, signed
 from ..market.companies import SECTORS
@@ -16,6 +17,7 @@ from ..parsing import parse_amount, parse_price
 from ..services.market import MarketService
 from ..services.trading import TradingService
 from ..ui import charts
+from ..ui.guide import guide_pages
 from ..ui.embeds import (
     Paginator,
     alerts_embed,
@@ -35,6 +37,7 @@ from ..ui.embeds import (
 PER_PAGE = 5
 
 
+@bind_contexts
 class Stocks(commands.Cog):
     """Everything the exchange offers."""
 
@@ -45,10 +48,10 @@ class Stocks(commands.Cog):
 
     # ------------------------------------------------------------------ helpers
 
-    async def _company_or_error(self, interaction: discord.Interaction, symbol: str):
-        company = await self.market.resolve_symbol(interaction.guild_id, symbol)
+    async def _company_or_error(self, ctx: CommandContext, symbol: str):
+        company = await self.market.resolve_symbol(ctx.guild_id, symbol)
         if company is None:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(f"No listing matches `{symbol}`."), ephemeral=True
             )
         return company
@@ -73,8 +76,8 @@ class Stocks(commands.Cog):
     # -------------------------------------------------------------- market info
 
     @app_commands.command(name="market", description="Market overview: index, movers and headlines.")
-    async def market_overview(self, interaction: discord.Interaction) -> None:
-        snapshot = await self.market.snapshot(interaction.guild_id)
+    async def market_overview(self, ctx: CommandContext) -> None:
+        snapshot = await self.market.snapshot(ctx.guild_id)
         embed = market_overview_embed(
             index_value=snapshot.index_value,
             index_change=snapshot.index_change,
@@ -82,7 +85,7 @@ class Stocks(commands.Cog):
             tick=snapshot.tick,
             companies=snapshot.companies,
         )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="list", description="Browse every listed company.")
     @app_commands.describe(sector="Filter the board to a single sector.")
@@ -90,16 +93,16 @@ class Stocks(commands.Cog):
         sector=[app_commands.Choice(name=s, value=s) for s in SECTORS]
     )
     async def list_stocks(
-        self, interaction: discord.Interaction, sector: app_commands.Choice[str] | None = None
+        self, ctx: CommandContext, sector: app_commands.Choice[str] | None = None
     ) -> None:
-        snapshot = await self.market.snapshot(interaction.guild_id)
+        snapshot = await self.market.snapshot(ctx.guild_id)
         companies = snapshot.companies
         if sector is not None:
             companies = [c for c in companies if c.sector == sector.value]
         companies = sorted(companies, key=lambda c: c.symbol)
         pages = max(1, (len(companies) + PER_PAGE - 1) // PER_PAGE)
         view = Paginator(
-            author_id=interaction.user.id,
+            author_id=ctx.user.id,
             total_pages=pages,
             build=lambda page: stock_list_embed(
                 companies,
@@ -108,22 +111,22 @@ class Stocks(commands.Cog):
                 sector=sector.value if sector else None,
             ),
         )
-        await interaction.response.send_message(embed=view.build(0), view=view)
+        await ctx.send(embed=view.build(0), view=view)
 
     @app_commands.command(name="quote", description="Show the full quote for one company.")
     @app_commands.describe(symbol="Ticker or company name.")
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
-    async def quote(self, interaction: discord.Interaction, symbol: str) -> None:
-        company = await self._company_or_error(interaction, symbol)
+    async def quote(self, ctx: CommandContext, symbol: str) -> None:
+        company = await self._company_or_error(ctx, symbol)
         if company is None:
             return
-        position = await self.trading.get_position(interaction.user.id, interaction.guild_id, company.symbol)
+        position = await self.trading.get_position(ctx.user.id, ctx.guild_id, company.symbol)
         embed = listing_embed(
             company,
             held=position.quantity if position else 0,
             average_cost=position.average_cost if position else 0.0,
         )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="chart", description="Render a price chart for a company.")
     @app_commands.describe(
@@ -131,16 +134,16 @@ class Stocks(commands.Cog):
     )
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
     async def chart(
-        self, interaction: discord.Interaction, symbol: str, points: int = 120
+        self, ctx: CommandContext, symbol: str, points: int = 120
     ) -> None:
-        company = await self._company_or_error(interaction, symbol)
+        company = await self._company_or_error(ctx, symbol)
         if company is None:
             return
         points = max(10, min(400, points))
-        await interaction.response.defer()
+        await ctx.defer()
         history = await self.market.history(company.symbol, points)
         position = await self.trading.get_position(
-            interaction.user.id, interaction.guild_id, company.symbol
+            ctx.user.id, ctx.guild_id, company.symbol
         )
         image = await charts.price_chart(
             company.symbol,
@@ -149,7 +152,7 @@ class Stocks(commands.Cog):
             average_cost=position.average_cost if position else None,
         )
         if image is None:
-            await interaction.followup.send(
+            await ctx.followup_send(
                 embed=error_embed(
                     "Not enough price history yet — the chart fills in as the market ticks."
                 )
@@ -165,14 +168,14 @@ class Stocks(commands.Cog):
             color=config.embed_color,
         )
         embed.set_image(url=f"attachment://{company.symbol}.png")
-        await interaction.followup.send(embed=embed, file=file)
+        await ctx.followup_send(embed=embed, file=file)
 
     @app_commands.command(name="compare", description="Chart several companies against each other.")
     @app_commands.describe(symbols="Up to 5 tickers separated by spaces.")
-    async def compare(self, interaction: discord.Interaction, symbols: str) -> None:
+    async def compare(self, ctx: CommandContext, symbols: str) -> None:
         tokens = [token for token in symbols.replace(",", " ").split() if token][:5]
         if len(tokens) < 2:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed("Give at least two tickers, e.g. `NOVA TERA BREW`."),
                 ephemeral=True,
             )
@@ -180,7 +183,7 @@ class Stocks(commands.Cog):
         series: dict[str, list[float]] = {}
         missing: list[str] = []
         for token in tokens:
-            company = await self.market.resolve_symbol(interaction.guild_id, token)
+            company = await self.market.resolve_symbol(ctx.guild_id, token)
             if company is None:
                 missing.append(token)
                 continue
@@ -189,7 +192,7 @@ class Stocks(commands.Cog):
                 series[company.symbol] = [value for _, value in history]
 
         if len(series) < 2:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(
                     "Need history for at least two of those tickers"
                     + (f" (unknown: {', '.join(missing)})" if missing else ".")
@@ -198,10 +201,10 @@ class Stocks(commands.Cog):
             )
             return
 
-        await interaction.response.defer()
+        await ctx.defer()
         image = await charts.comparison_chart(series, title="Relative performance (last 120 ticks)")
         if image is None:
-            await interaction.followup.send(embed=error_embed("Could not build that chart."))
+            await ctx.followup_send(embed=error_embed("Could not build that chart."))
             return
         file = discord.File(fp=io.BytesIO(image), filename="compare.png")
         embed = discord.Embed(
@@ -210,37 +213,37 @@ class Stocks(commands.Cog):
             color=config.embed_color,
         )
         embed.set_image(url="attachment://compare.png")
-        await interaction.followup.send(embed=embed, file=file)
+        await ctx.followup_send(embed=embed, file=file)
 
     @app_commands.command(name="sectors", description="See how each sector is performing today.")
-    async def sectors(self, interaction: discord.Interaction) -> None:
-        engine = await self.market.get_engine(interaction.guild_id)
-        await interaction.response.send_message(embed=sector_embed(engine.sector_performance()))
+    async def sectors(self, ctx: CommandContext) -> None:
+        engine = await self.market.get_engine(ctx.guild_id)
+        await ctx.send(embed=sector_embed(engine.sector_performance()))
 
     @app_commands.command(name="news", description="Read the latest market headlines.")
-    async def news(self, interaction: discord.Interaction) -> None:
-        items = await self.market.news(interaction.guild_id, 8)
-        await interaction.response.send_message(embed=news_embed(items))
+    async def news(self, ctx: CommandContext) -> None:
+        items = await self.market.news(ctx.guild_id, 8)
+        await ctx.send(embed=news_embed(items))
 
     # ------------------------------------------------------------------ trading
 
     @app_commands.command(name="buy", description="Buy shares at the current market price.")
     @app_commands.describe(symbol="Ticker or company name.", quantity="How many shares.")
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
-    async def buy(self, interaction: discord.Interaction, symbol: str, quantity: str) -> None:
+    async def buy(self, ctx: CommandContext, symbol: str, quantity: str) -> None:
         try:
-            company = await self.market.resolve_symbol(interaction.guild_id, symbol)
+            company = await self.market.resolve_symbol(ctx.guild_id, symbol)
             if company is None:
                 raise HeraError(f"No listing matches `{symbol}`.")
             estimate, _ = self.trading.estimate_execution_price(company, 1, side="buy")
             account = await self.bot.economy.get_account(  # type: ignore[attr-defined]
-                interaction.user.id, interaction.guild_id
+                ctx.user.id, ctx.guild_id
             )
             max_shares = max(0, int(account.wallet // max(estimate, 0.01)))
             qty = parse_amount(quantity, maximum=max_shares)
-            fill = await self.trading.buy(interaction.user.id, interaction.guild_id, symbol, qty)
+            fill = await self.trading.buy(ctx.user.id, ctx.guild_id, symbol, qty)
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
 
         embed = trade_result_embed(
@@ -255,26 +258,26 @@ class Stocks(commands.Cog):
                 ("Slippage", f"{fill.slippage_pct:.2f}%"),
             ],
         )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="sell", description="Sell shares you own.")
     @app_commands.describe(symbol="Ticker or company name.", quantity="How many shares, or 'all'.")
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
-    async def sell(self, interaction: discord.Interaction, symbol: str, quantity: str) -> None:
+    async def sell(self, ctx: CommandContext, symbol: str, quantity: str) -> None:
         try:
-            company = await self.market.resolve_symbol(interaction.guild_id, symbol)
+            company = await self.market.resolve_symbol(ctx.guild_id, symbol)
             if company is None:
                 raise HeraError(f"No listing matches `{symbol}`.")
             position = await self.trading.get_position(
-                interaction.user.id, interaction.guild_id, company.symbol
+                ctx.user.id, ctx.guild_id, company.symbol
             )
             held = position.quantity if position else 0
             if held <= 0:
                 raise InsufficientShares(company.symbol, 1, 0)
             qty = parse_amount(quantity, maximum=held)
-            fill = await self.trading.sell(interaction.user.id, interaction.guild_id, symbol, qty)
+            fill = await self.trading.sell(ctx.user.id, ctx.guild_id, symbol, qty)
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
 
         embed = trade_result_embed(
@@ -288,20 +291,20 @@ class Stocks(commands.Cog):
                 ("Realised P/L", signed(fill.realized_pnl)),
             ],
         )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="short", description="Open a short position with posted collateral.")
     @app_commands.describe(symbol="Ticker or company name.", quantity="How many shares to short.")
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
-    async def short(self, interaction: discord.Interaction, symbol: str, quantity: str) -> None:
+    async def short(self, ctx: CommandContext, symbol: str, quantity: str) -> None:
         try:
-            company = await self.market.resolve_symbol(interaction.guild_id, symbol)
+            company = await self.market.resolve_symbol(ctx.guild_id, symbol)
             if company is None:
                 raise HeraError(f"No listing matches `{symbol}`.")
             qty = parse_amount(quantity)
-            fill = await self.trading.short(interaction.user.id, interaction.guild_id, symbol, qty)
+            fill = await self.trading.short(ctx.user.id, ctx.guild_id, symbol, qty)
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
 
         embed = trade_result_embed(
@@ -316,26 +319,26 @@ class Stocks(commands.Cog):
             ],
         )
         embed.set_footer(text="Profit if the price falls. Collateral is returned when you cover.")
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="cover", description="Close part or all of a short position.")
     @app_commands.describe(symbol="Ticker or company name.", quantity="How many shares, or 'all'.")
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
-    async def cover(self, interaction: discord.Interaction, symbol: str, quantity: str) -> None:
+    async def cover(self, ctx: CommandContext, symbol: str, quantity: str) -> None:
         try:
-            company = await self.market.resolve_symbol(interaction.guild_id, symbol)
+            company = await self.market.resolve_symbol(ctx.guild_id, symbol)
             if company is None:
                 raise HeraError(f"No listing matches `{symbol}`.")
             short = await self.trading.get_short(
-                interaction.user.id, interaction.guild_id, company.symbol
+                ctx.user.id, ctx.guild_id, company.symbol
             )
             held = short.quantity if short else 0
             if held <= 0:
                 raise InsufficientShares(company.symbol, 1, 0)
             qty = parse_amount(quantity, maximum=held)
-            fill = await self.trading.cover(interaction.user.id, interaction.guild_id, symbol, qty)
+            fill = await self.trading.cover(ctx.user.id, ctx.guild_id, symbol, qty)
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
 
         embed = trade_result_embed(
@@ -348,7 +351,7 @@ class Stocks(commands.Cog):
                 ("Realised P/L", signed(fill.realized_pnl)),
             ],
         )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="limit", description="Place a resting limit order.")
     @app_commands.describe(
@@ -368,7 +371,7 @@ class Stocks(commands.Cog):
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
     async def limit(
         self,
-        interaction: discord.Interaction,
+        ctx: CommandContext,
         side: app_commands.Choice[str],
         symbol: str,
         quantity: str,
@@ -378,10 +381,10 @@ class Stocks(commands.Cog):
             qty = parse_amount(quantity)
             target = parse_price(limit_price)
             order_id = await self.trading.place_limit_order(
-                interaction.user.id, interaction.guild_id, symbol, side.value, qty, target
+                ctx.user.id, ctx.guild_id, symbol, side.value, qty, target
             )
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
 
         embed = trade_result_embed(
@@ -393,25 +396,25 @@ class Stocks(commands.Cog):
                 ("Manage", "`/orders` to review, `/cancel` to pull it"),
             ],
         )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="orders", description="Review your resting limit orders.")
-    async def orders(self, interaction: discord.Interaction) -> None:
-        rows = await self.trading.open_orders(interaction.user.id, interaction.guild_id)
-        await interaction.response.send_message(
-            embed=order_book_embed(rows, user=interaction.user), ephemeral=True
+    async def orders(self, ctx: CommandContext) -> None:
+        rows = await self.trading.open_orders(ctx.user.id, ctx.guild_id)
+        await ctx.send(
+            embed=order_book_embed(rows, user=ctx.user), ephemeral=True
         )
 
     @app_commands.command(name="cancel", description="Cancel one of your resting orders.")
     @app_commands.describe(order_id="The order number shown by /orders.")
-    async def cancel(self, interaction: discord.Interaction, order_id: int) -> None:
-        ok = await self.trading.cancel_order(interaction.user.id, interaction.guild_id, order_id)
+    async def cancel(self, ctx: CommandContext, order_id: int) -> None:
+        ok = await self.trading.cancel_order(ctx.user.id, ctx.guild_id, order_id)
         if not ok:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(f"No open order **#{order_id}** belongs to you."), ephemeral=True
             )
             return
-        await interaction.response.send_message(
+        await ctx.send(
             embed=trade_result_embed(
                 title="🗑️ Order cancelled",
                 description=f"Order **#{order_id}** was cancelled and any reservation refunded.",
@@ -425,47 +428,47 @@ class Stocks(commands.Cog):
     @app_commands.command(name="portfolio", description="Your holdings, cash and profit and loss.")
     @app_commands.describe(member="Inspect someone else's portfolio.")
     async def portfolio(
-        self, interaction: discord.Interaction, member: discord.Member | None = None
+        self, ctx: CommandContext, member: discord.Member | None = None
     ) -> None:
-        target = member or interaction.user
-        result = await self.trading.get_portfolio(target.id, interaction.guild_id)
-        await interaction.response.send_message(
+        target = member or ctx.user
+        result = await self.trading.get_portfolio(target.id, ctx.guild_id)
+        await ctx.send(
             embed=portfolio_embed(result, user=target)
         )
 
     @app_commands.command(name="allocation", description="Chart how your portfolio is allocated.")
-    async def allocation(self, interaction: discord.Interaction) -> None:
-        result = await self.trading.get_portfolio(interaction.user.id, interaction.guild_id)
+    async def allocation(self, ctx: CommandContext) -> None:
+        result = await self.trading.get_portfolio(ctx.user.id, ctx.guild_id)
         labels = [position.symbol for position in result.positions]
         values = [position.market_value for position in result.positions]
         labels.append("Cash")
         values.append(float(result.wallet + result.bank))
 
-        await interaction.response.defer()
+        await ctx.defer()
         image = await charts.allocation_chart(labels, values)
         if image is None:
-            await interaction.followup.send(embed=error_embed("You have nothing to allocate yet."))
+            await ctx.followup_send(embed=error_embed("You have nothing to allocate yet."))
             return
         file = discord.File(fp=io.BytesIO(image), filename="allocation.png")
         embed = discord.Embed(title="🥧 Portfolio allocation", color=config.embed_color)
         embed.set_image(url="attachment://allocation.png")
-        await interaction.followup.send(embed=embed, file=file)
+        await ctx.followup_send(embed=embed, file=file)
 
     @app_commands.command(name="position", description="Drill into one of your positions.")
     @app_commands.describe(symbol="Ticker or company name.")
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
-    async def position(self, interaction: discord.Interaction, symbol: str) -> None:
-        company = await self._company_or_error(interaction, symbol)
+    async def position(self, ctx: CommandContext, symbol: str) -> None:
+        company = await self._company_or_error(ctx, symbol)
         if company is None:
             return
         long_position = await self.trading.get_position(
-            interaction.user.id, interaction.guild_id, company.symbol
+            ctx.user.id, ctx.guild_id, company.symbol
         )
         short_position = await self.trading.get_short(
-            interaction.user.id, interaction.guild_id, company.symbol
+            ctx.user.id, ctx.guild_id, company.symbol
         )
         if long_position is None and short_position is None:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(f"You have no open position in {company.symbol}."),
                 ephemeral=True,
             )
@@ -489,13 +492,13 @@ class Stocks(commands.Cog):
                 ),
                 inline=False,
             )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="traders", description="Rank members by portfolio net worth.")
-    async def traders(self, interaction: discord.Interaction) -> None:
-        rows = await self.trading.leaderboard(interaction.guild_id)
-        await interaction.response.send_message(
-            embed=leaderboard_embed(rows, guild=interaction.guild, kind="Trader")
+    async def traders(self, ctx: CommandContext) -> None:
+        rows = await self.trading.leaderboard(ctx.guild_id)
+        await ctx.send(
+            embed=leaderboard_embed(rows, guild=ctx.guild, kind="Trader")
         )
 
     # ------------------------------------------------------------ alerts/watches
@@ -515,7 +518,7 @@ class Stocks(commands.Cog):
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
     async def alert(
         self,
-        interaction: discord.Interaction,
+        ctx: CommandContext,
         symbol: str,
         direction: app_commands.Choice[str],
         threshold: str,
@@ -523,12 +526,12 @@ class Stocks(commands.Cog):
         try:
             value = parse_price(threshold)
             alert_id = await self.trading.create_alert(
-                interaction.user.id, interaction.guild_id, symbol, direction.value, value
+                ctx.user.id, ctx.guild_id, symbol, direction.value, value
             )
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
-        await interaction.response.send_message(
+        await ctx.send(
             embed=trade_result_embed(
                 title="🔔 Alert set",
                 description=f"Alert **#{alert_id}** will fire when the price goes {direction.value} {price(value)}.",
@@ -538,17 +541,17 @@ class Stocks(commands.Cog):
         )
 
     @app_commands.command(name="alerts", description="List your active price alerts.")
-    async def alerts(self, interaction: discord.Interaction) -> None:
-        rows = await self.trading.list_alerts(interaction.user.id, interaction.guild_id)
-        await interaction.response.send_message(
-            embed=alerts_embed(rows, user=interaction.user), ephemeral=True
+    async def alerts(self, ctx: CommandContext) -> None:
+        rows = await self.trading.list_alerts(ctx.user.id, ctx.guild_id)
+        await ctx.send(
+            embed=alerts_embed(rows, user=ctx.user), ephemeral=True
         )
 
     @app_commands.command(name="unalert", description="Remove one of your price alerts.")
     @app_commands.describe(alert_id="The alert number shown by /alerts.")
-    async def unalert(self, interaction: discord.Interaction, alert_id: int) -> None:
-        ok = await self.trading.delete_alert(interaction.user.id, interaction.guild_id, alert_id)
-        await interaction.response.send_message(
+    async def unalert(self, ctx: CommandContext, alert_id: int) -> None:
+        ok = await self.trading.delete_alert(ctx.user.id, ctx.guild_id, alert_id)
+        await ctx.send(
             embed=(
                 trade_result_embed(
                     title="🗑️ Alert removed",
@@ -571,31 +574,45 @@ class Stocks(commands.Cog):
     )
     @app_commands.autocomplete(symbol=_symbol_autocomplete)
     async def watch(
-        self, interaction: discord.Interaction, action: app_commands.Choice[str], symbol: str
+        self, ctx: CommandContext, action: app_commands.Choice[str], symbol: str
     ) -> None:
         try:
             if action.value == "add":
-                added = await self.trading.add_watch(interaction.user.id, interaction.guild_id, symbol)
+                added = await self.trading.add_watch(ctx.user.id, ctx.guild_id, symbol)
                 message = f"{symbol.upper()} added to your watchlist." if added else "Already on your watchlist."
             else:
-                removed = await self.trading.remove_watch(interaction.user.id, interaction.guild_id, symbol)
+                removed = await self.trading.remove_watch(ctx.user.id, ctx.guild_id, symbol)
                 message = f"{symbol.upper()} removed." if removed else "That was not on your watchlist."
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
-        await interaction.response.send_message(
+        await ctx.send(
             embed=trade_result_embed(title="⭐ Watchlist", description=message, color=config.embed_color),
             ephemeral=True,
         )
 
     @app_commands.command(name="watchlist", description="Show your watchlist with live prices.")
-    async def watchlist(self, interaction: discord.Interaction) -> None:
-        symbols = await self.trading.watchlist(interaction.user.id, interaction.guild_id)
-        engine = await self.market.get_engine(interaction.guild_id)
+    async def watchlist(self, ctx: CommandContext) -> None:
+        symbols = await self.trading.watchlist(ctx.user.id, ctx.guild_id)
+        engine = await self.market.get_engine(ctx.guild_id)
         companies = [engine.companies[s] for s in symbols if s in engine.companies]
-        await interaction.response.send_message(
-            embed=watchlist_embed(symbols, companies, user=interaction.user)
+        await ctx.send(
+            embed=watchlist_embed(symbols, companies, user=ctx.user)
         )
+
+    @app_commands.command(
+        name="markethelp",
+        description="How the market works: ticks, risk, trading and getting started.",
+    )
+    async def market_help(self, ctx: CommandContext) -> None:
+        pages = guide_pages()
+        view = Paginator(
+            author_id=ctx.user.id,
+            total_pages=len(pages),
+            build=lambda index: pages[index].to_embed(page=index, total=len(pages)),
+            timeout=240.0,
+        )
+        await ctx.send(embed=pages[0].to_embed(page=0, total=len(pages)), view=view)
 
 
 async def setup(bot: commands.Bot) -> None:

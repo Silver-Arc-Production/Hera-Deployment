@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..config import config
+from ..context import CommandContext, bind_contexts
 from ..errors import CooldownActive, HeraError, InsufficientFunds
 from ..formatting import duration, money, progress_bar, signed
 from ..parsing import parse_amount
@@ -14,6 +15,7 @@ from ..services.economy import Account, EconomyService
 from ..ui.embeds import error_embed
 
 
+@bind_contexts
 class Economy(commands.Cog):
     """Currency commands shared by the whole bot."""
 
@@ -46,18 +48,18 @@ class Economy(commands.Cog):
     @app_commands.command(name="balance", description="Show your wallet, bank and net worth.")
     @app_commands.describe(member="Look up someone else's balance instead.")
     async def balance(
-        self, interaction: discord.Interaction, member: discord.Member | None = None
+        self, ctx: CommandContext, member: discord.Member | None = None
     ) -> None:
-        target = member or interaction.user
-        account = await self.economy.get_account(target.id, interaction.guild_id)
-        await interaction.response.send_message(embed=self._balance_embed(account, target))
+        target = member or ctx.user
+        account = await self.economy.get_account(target.id, ctx.guild_id)
+        await ctx.send(embed=self._balance_embed(account, target))
 
     @app_commands.command(name="work", description="Do a shift for some credits.")
-    async def work(self, interaction: discord.Interaction) -> None:
+    async def work(self, ctx: CommandContext) -> None:
         try:
-            payout, account = await self.economy.work(interaction.user.id, interaction.guild_id)
+            payout, account = await self.economy.work(ctx.user.id, ctx.guild_id)
         except CooldownActive as exc:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(
                     f"You are still tired. Try again in **{duration(exc.seconds_remaining)}**."
                 ),
@@ -70,16 +72,16 @@ class Economy(commands.Cog):
             color=config.embed_color,
         )
         embed.add_field(name="New wallet", value=money(account.wallet), inline=True)
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="daily", description="Claim your daily reward and build a streak.")
-    async def daily(self, interaction: discord.Interaction) -> None:
+    async def daily(self, ctx: CommandContext) -> None:
         try:
             payout, streak, account = await self.economy.daily(
-                interaction.user.id, interaction.guild_id
+                ctx.user.id, ctx.guild_id
             )
         except CooldownActive as exc:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(
                     f"Already claimed. Come back in **{duration(exc.seconds_remaining)}**."
                 ),
@@ -94,88 +96,88 @@ class Economy(commands.Cog):
         embed.add_field(name="Streak", value=f"{streak} day(s)", inline=True)
         embed.add_field(name="Bank", value=money(account.bank), inline=True)
         embed.set_footer(text="Rewards go straight to your bank — spend them with /withdraw.")
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="deposit", description="Move credits from your wallet into the bank.")
     @app_commands.describe(amount="Amount to deposit. Accepts 1k, 2.5m or 'all'.")
-    async def deposit(self, interaction: discord.Interaction, amount: str) -> None:
-        account = await self.economy.get_account(interaction.user.id, interaction.guild_id)
+    async def deposit(self, ctx: CommandContext, amount: str) -> None:
+        account = await self.economy.get_account(ctx.user.id, ctx.guild_id)
         try:
             value = parse_amount(amount, maximum=account.wallet)
-            updated = await self.economy.transfer(interaction.user.id, interaction.guild_id, value)
+            updated = await self.economy.transfer(ctx.user.id, ctx.guild_id, value)
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
-        await interaction.response.send_message(
-            embed=self._balance_embed(updated, interaction.user)
+        await ctx.send(
+            embed=self._balance_embed(updated, ctx.user)
         )
 
     @app_commands.command(name="withdraw", description="Move credits from the bank to your wallet.")
     @app_commands.describe(amount="Amount to withdraw. Accepts 1k, 2.5m or 'all'.")
-    async def withdraw(self, interaction: discord.Interaction, amount: str) -> None:
-        account = await self.economy.get_account(interaction.user.id, interaction.guild_id)
+    async def withdraw(self, ctx: CommandContext, amount: str) -> None:
+        account = await self.economy.get_account(ctx.user.id, ctx.guild_id)
         try:
             value = parse_amount(amount, maximum=account.bank)
-            updated = await self.economy.withdraw(interaction.user.id, interaction.guild_id, value)
+            updated = await self.economy.withdraw(ctx.user.id, ctx.guild_id, value)
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
-        await interaction.response.send_message(
-            embed=self._balance_embed(updated, interaction.user)
+        await ctx.send(
+            embed=self._balance_embed(updated, ctx.user)
         )
 
     @app_commands.command(name="pay", description="Send credits to another member.")
     @app_commands.describe(member="Who to pay.", amount="How much to send.")
     async def pay(
-        self, interaction: discord.Interaction, member: discord.Member, amount: str
+        self, ctx: CommandContext, member: discord.Member, amount: str
     ) -> None:
-        if member.id == interaction.user.id:
-            await interaction.response.send_message(
+        if member.id == ctx.user.id:
+            await ctx.send(
                 embed=error_embed("You cannot pay yourself."), ephemeral=True
             )
             return
         if member.bot:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed("Bots do not need credits."), ephemeral=True
             )
             return
-        account = await self.economy.get_account(interaction.user.id, interaction.guild_id)
+        account = await self.economy.get_account(ctx.user.id, ctx.guild_id)
         try:
             value = parse_amount(amount, maximum=account.wallet)
             await self.economy.debit(
-                interaction.user.id,
-                interaction.guild_id,
+                ctx.user.id,
+                ctx.guild_id,
                 value,
                 kind="transfer_out",
                 note=f"Paid {member.display_name}",
             )
             await self.economy.credit(
                 member.id,
-                interaction.guild_id,
+                ctx.guild_id,
                 value,
                 kind="transfer_in",
-                note=f"Payment from {interaction.user.display_name}",
+                note=f"Payment from {ctx.user.display_name}",
             )
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
         embed = discord.Embed(
             title="💸 Payment sent",
-            description=f"{interaction.user.mention} paid {member.mention} {money(value)}.",
+            description=f"{ctx.user.mention} paid {member.mention} {money(value)}.",
             color=config.embed_color,
         )
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="bankupgrade", description="Buy more space in your bank.")
-    async def bankupgrade(self, interaction: discord.Interaction) -> None:
-        account = await self.economy.get_account(interaction.user.id, interaction.guild_id)
+    async def bankupgrade(self, ctx: CommandContext) -> None:
+        account = await self.economy.get_account(ctx.user.id, ctx.guild_id)
         cost = config.economy.bank_upgrade_base_cost * account.bank_level
         try:
             updated, paid = await self.economy.upgrade_bank(
-                interaction.user.id, interaction.guild_id
+                ctx.user.id, ctx.guild_id
             )
         except InsufficientFunds as exc:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(
                     f"You need {money(cost)} in your wallet. You have {money(exc.available)}."
                 ),
@@ -188,28 +190,28 @@ class Economy(commands.Cog):
             color=config.embed_color,
         )
         embed.add_field(name="New capacity", value=money(updated.bank_capacity), inline=True)
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="rob", description="Try to steal from another member's wallet.")
     @app_commands.describe(member="Who to rob.")
-    async def rob(self, interaction: discord.Interaction, member: discord.Member) -> None:
-        if member.bot or member.id == interaction.user.id:
-            await interaction.response.send_message(
+    async def rob(self, ctx: CommandContext, member: discord.Member) -> None:
+        if member.bot or member.id == ctx.user.id:
+            await ctx.send(
                 embed=error_embed("Pick a real member who is not you."), ephemeral=True
             )
             return
         try:
             success, amount, account = await self.economy.rob(
-                interaction.user.id, interaction.guild_id, member.id
+                ctx.user.id, ctx.guild_id, member.id
             )
         except CooldownActive as exc:
-            await interaction.response.send_message(
+            await ctx.send(
                 embed=error_embed(f"Lay low for **{duration(exc.seconds_remaining)}**."),
                 ephemeral=True,
             )
             return
         except HeraError as exc:
-            await interaction.response.send_message(embed=error_embed(str(exc)), ephemeral=True)
+            await ctx.send(embed=error_embed(str(exc)), ephemeral=True)
             return
 
         if success:
@@ -229,15 +231,15 @@ class Economy(commands.Cog):
                 color=config.error_color,
             )
         embed.add_field(name="Wallet", value=money(account.wallet), inline=True)
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     @app_commands.command(name="history", description="Review your recent transactions.")
     @app_commands.describe(count="How many entries to show (max 25).")
-    async def history(self, interaction: discord.Interaction, count: int = 10) -> None:
+    async def history(self, ctx: CommandContext, count: int = 10) -> None:
         count = max(1, min(25, count))
-        rows = await self.economy.history(interaction.user.id, interaction.guild_id, count)
+        rows = await self.economy.history(ctx.user.id, ctx.guild_id, count)
         embed = discord.Embed(
-            title=f"🧾 {interaction.user.display_name}'s transactions",
+            title=f"🧾 {ctx.user.display_name}'s transactions",
             color=config.embed_color,
         )
         if not rows:
@@ -247,21 +249,21 @@ class Economy(commands.Cog):
                 f"`{row['kind']:<14}` {signed(float(row['amount'])):>16}  {row['note'] or ''}"
                 for row in rows
             )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="richest", description="Show the wealthiest members in this server.")
-    async def richest(self, interaction: discord.Interaction) -> None:
-        rows = await self.economy.leaderboard(interaction.guild_id)
+    async def richest(self, ctx: CommandContext) -> None:
+        rows = await self.economy.leaderboard(ctx.guild_id)
         embed = discord.Embed(title="🏆 Richest members", color=config.embed_color)
         medals = ["🥇", "🥈", "🥉"]
         lines = []
         for index, row in enumerate(rows):
-            member = interaction.guild.get_member(int(row["user_id"]))
+            member = ctx.guild.get_member(int(row["user_id"]))
             name = member.display_name if member else f"User {row['user_id']}"
             prefix = medals[index] if index < len(medals) else f"`#{index + 1:>2}`"
             lines.append(f"{prefix} **{name}** — {money(float(row['total']))}")
         embed.description = "\n".join(lines) or "Nobody has any wealth yet."
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot) -> None:

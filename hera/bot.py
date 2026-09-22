@@ -19,13 +19,36 @@ from .services.trading import TradingService
 log = logging.getLogger("hera")
 
 
+def _usage_error(ctx: commands.Context, error: commands.CommandError) -> str:
+    """Explain a mistyped command and show how to call it correctly."""
+    if isinstance(error, commands.MissingRequiredArgument):
+        return f"`{error.param.name}` is required: {usage_for(ctx)}"
+    if isinstance(error, commands.BadArgument):
+        return f"{error}\n{usage_for(ctx)}"
+    return f"That is not how the command is used: {usage_for(ctx)}"
+
+
+def usage_for(ctx: commands.Context) -> str:
+    """Render a copy-pasteable usage line for the invoked command."""
+    command = ctx.command
+    if command is None:
+        return f"Use `{config.prefix}help`."
+    return f"`{config.prefix}{command.qualified_name} {command.signature}`".rstrip()
+
+
 class HeraBot(commands.Bot):
     """A bot instance that owns the database and every shared service."""
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
         intents.members = True
-        super().__init__(command_prefix="!", intents=intents, help_command=None)
+        # Prefix commands read ordinary messages, which Discord gates behind the
+        # privileged Message Content intent. Without it the bot still boots and
+        # slash commands still work, but typed commands are invisible to it.
+        intents.message_content = True
+        super().__init__(
+            command_prefix=config.prefix, intents=intents, help_command=None
+        )
 
         self.db = Database(config.db_path)
         self.economy = EconomyService(self.db)
@@ -38,7 +61,12 @@ class HeraBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.db.connect()
-        for extension in ("hera.cogs.economy", "hera.cogs.stocks", "hera.cogs.admin"):
+        for extension in (
+            "hera.cogs.economy",
+            "hera.cogs.stocks",
+            "hera.cogs.admin",
+            "hera.cogs.help",
+        ):
             await self.load_extension(extension)
             log.info("loaded extension %s", extension)
 
@@ -196,5 +224,30 @@ class HeraBot(commands.Bot):
                 await interaction.followup.send(embed=embed, ephemeral=True)
             else:
                 await interaction.response.send_message(embed=embed, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
+    async def on_command_error(
+        self, ctx: commands.Context, error: commands.CommandError
+    ) -> None:
+        """Report prefixed-command failures the same way slash failures are shown."""
+        if isinstance(error, commands.CommandNotFound):
+            return
+        if isinstance(error, commands.CommandInvokeError):
+            original: BaseException = error.original
+        else:
+            original = error
+
+        if isinstance(original, HeraError):
+            message = str(original)
+        elif isinstance(original, commands.UserInputError):
+            message = _usage_error(ctx, error)
+        else:
+            log.error("prefix command error", exc_info=original)
+            message = "Something went wrong handling that command."
+
+        embed = discord.Embed(title=f"❌ {message}", color=config.error_color)
+        try:
+            await ctx.reply(embed=embed)
         except discord.HTTPException:
             pass
