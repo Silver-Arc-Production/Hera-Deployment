@@ -1,5 +1,5 @@
 # Render blueprint: a single web service running the bot, which also serves the
-# read-only dashboard on its port (WEB_ENABLED=true).
+# read-only dashboard on the port Render routes to it.
 #
 # One service rather than two, because a Render persistent disk can be attached
 # to only one service -- a separate dashboard service could not read the same
@@ -22,12 +22,13 @@ services:
         sync: false
       - key: STOCK_NEWS_CHANNEL_ID
         sync: false
+      # The port is not set here on purpose: Render injects PORT and routes
+      # inbound traffic and the health check to exactly that value, so the app
+      # binds it. Setting WEB_PORT here would be ignored anyway.
       - key: WEB_ENABLED
         value: "true"
       - key: WEB_BIND_HOST
         value: 0.0.0.0
-      - key: WEB_PORT
-        value: "8080"
     disk:
       name: hera-data
       mountPath: /data

@@ -47,6 +47,11 @@ Python left in the tree, so do not look for `requirements.txt`, `pytest.ini` or
 - Two run modes: standalone (`npm run web` → `dist/dashboard/index.js`) opens its
   own database; in-process (`WEB_ENABLED=true` with the bot) shares the bot's
   services and is what `render.yaml` deploys.
+- The dashboard port resolution lives in `resolveWebConfig` in `hera/config.ts`:
+  a host-injected `PORT` wins over `WEB_PORT`, and the mere presence of `PORT`
+  enables the dashboard unless `WEB_ENABLED` is set explicitly. This is what
+  keeps a Render web service from failing its port scan with "no open ports
+  detected"; do not reintroduce a hard-coded `WEB_PORT` in `render.yaml`.
 - `render.yaml` intentionally deploys ONE web service. A Render persistent disk
   can be attached to only one service, so a separate dashboard service could not
   read the bot's SQLite file. Splitting them would require replacing SQLite with

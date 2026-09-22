@@ -73,31 +73,57 @@ export interface BotConfig {
   web: WebConfig;
 }
 
-function envInt(key: string, fallback: number): number {
-  const raw = process.env[key];
+/** The subset of ``process.env`` the config reads, injectable so tests can vary it. */
+export type Env = Record<string, string | undefined>;
+
+const processEnv: Env = process.env;
+
+function envInt(env: Env, key: string, fallback: number): number {
+  const raw = env[key];
   if (raw === undefined || raw.trim() === '') return fallback;
   const value = Number.parseInt(raw, 10);
   return Number.isNaN(value) ? fallback : value;
 }
 
-function envFloat(key: string, fallback: number): number {
-  const raw = process.env[key];
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const value = Number.parseFloat(raw);
-  return Number.isNaN(value) ? fallback : value;
-}
-
-function envBool(key: string, fallback: boolean): boolean {
-  const raw = process.env[key];
+function envBool(env: Env, key: string, fallback: boolean): boolean {
+  const raw = env[key];
   if (raw === undefined) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
 }
 
-function envId(key: string): string | null {
-  const raw = process.env[key];
+function envId(env: Env, key: string): string | null {
+  const raw = env[key];
   if (raw === undefined) return null;
   const trimmed = raw.trim();
   return /^\d+$/.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Resolve the dashboard's bind settings.
+ *
+ * ``PORT`` is what Render (and most container hosts) inject for a web service,
+ * and Render routes inbound traffic and health checks to exactly that port. So
+ * ``PORT`` wins over ``WEB_PORT`` when both are set; ``WEB_PORT`` remains the
+ * knob for hosts that don't inject ``PORT``.
+ *
+ * A host that injects ``PORT`` is declaring that this process is the web
+ * service, so the dashboard is served even when ``WEB_ENABLED`` is unset --
+ * otherwise the deploy binds nothing and the host's port scan fails. An
+ * explicit ``WEB_ENABLED`` still wins in both directions, so operators can turn
+ * the dashboard off (or on) regardless.
+ */
+export function resolveWebConfig(env: Env): WebConfig {
+  const port = envInt(env, 'PORT', envInt(env, 'WEB_PORT', 8080));
+  // No explicit WEB_ENABLED leaves the decision to the host: a PORT means it is
+  // running us as a web service and expects a listener on that port.
+  const rawEnabled = env['WEB_ENABLED'];
+  const enabled =
+    rawEnabled === undefined ? env['PORT'] !== undefined : envBool(env, 'WEB_ENABLED', false);
+  return {
+    enabled,
+    host: env['WEB_BIND_HOST'] ?? '0.0.0.0',
+    port,
+  };
 }
 
 /** Default economy tuning, exported so tests can build configs without env vars. */
@@ -121,7 +147,7 @@ export const economyDefaults: EconomyConfig = {
 
 /** Default market tuning; tick length is the one value read from the environment. */
 export const marketDefaults: MarketConfig = {
-  tickSeconds: envInt('STOCK_TICK_SECONDS', 300),
+  tickSeconds: envInt(processEnv, 'STOCK_TICK_SECONDS', 300),
   historyLimit: 720,
   sessionTicks: 24,
   startingIndex: 1_000.0,
@@ -154,24 +180,20 @@ export const tradingDefaults: TradingConfig = {
 
 export const config: BotConfig = {
   token: process.env.DISCORD_TOKEN ?? '',
-  ownerId: envId('HERA_OWNER_ID'),
-  guildId: envId('DISCORD_GUILD_ID'),
-  marketChannelId: envId('STOCK_NEWS_CHANNEL_ID'),
+  ownerId: envId(processEnv, 'HERA_OWNER_ID'),
+  guildId: envId(processEnv, 'DISCORD_GUILD_ID'),
+  marketChannelId: envId(processEnv, 'STOCK_NEWS_CHANNEL_ID'),
   dbPath: process.env.DATABASE_PATH ?? 'data/hera.db',
   prefix: process.env.COMMAND_PREFIX || '!',
   currencySymbol: process.env.CURRENCY_SYMBOL ?? '\u{1FA99}',
   currencyName: process.env.CURRENCY_NAME ?? 'credits',
   embedColor: 0x2ecc71,
   errorColor: 0xe74c3c,
-  runMarketOnStartup: envBool('STOCK_RUN_ON_STARTUP', false),
+  runMarketOnStartup: envBool(processEnv, 'STOCK_RUN_ON_STARTUP', false),
   economy: economyDefaults,
   market: marketDefaults,
   trading: tradingDefaults,
-  web: {
-    enabled: envBool('WEB_ENABLED', false),
-    host: process.env.WEB_BIND_HOST ?? '0.0.0.0',
-    port: envInt('WEB_PORT', 8080),
-  },
+  web: resolveWebConfig(processEnv),
 };
 
 export function validateConfig(): void {

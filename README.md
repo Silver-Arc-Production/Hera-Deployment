@@ -125,9 +125,9 @@ Every knob has a sane default and is overridable in `.env`:
 | `STOCK_NEWS_CHANNEL_ID` | — | Channel for market news |
 | `COMMAND_PREFIX` | `!` | Prefix for message commands |
 | `HERA_OWNER_ID` | guild owner | User allowed to run operator commands |
-| `WEB_ENABLED` | `false` | Also serve the read-only dashboard |
+| `WEB_ENABLED` | auto | Serve the read-only dashboard. Unset means "serve it when the host injects `PORT`" |
 | `WEB_BIND_HOST` | `0.0.0.0` | Interface the dashboard binds |
-| `WEB_PORT` | `8080` | Dashboard port |
+| `WEB_PORT` | `8080` | Dashboard port; a host-injected `PORT` takes precedence |
 | `DATABASE_PATH` | `data/hera.db` | SQLite file |
 | `CURRENCY_SYMBOL` / `CURRENCY_NAME` | `🪙` / `credits` | Display currency |
 | `STOCK_TICK_SECONDS` | `300` | Seconds between market ticks |
@@ -141,10 +141,15 @@ The dashboard is a read-only view over the same SQLite file the bot writes to.
 It can run in one of two ways:
 
 - **In the bot process** — set `WEB_ENABLED=true` and the bot also serves the
-  dashboard on `WEB_PORT`, sharing its live market and one database handle. This
-  is what `render.yaml` deploys.
+  dashboard, sharing its live market and one database handle. This is what
+  `render.yaml` deploys.
 - **As its own process** — `npm run web` opens the database itself and serves the
-  site on `WEB_PORT`.
+  site.
+
+On a host that injects `PORT` (Render, Heroku, most PaaS) the dashboard is served
+without setting anything: an injected `PORT` means the host is running this as a
+web service and routes traffic and health checks to exactly that port, so the bot
+binds it. Locally, where no `PORT` exists, set `WEB_PORT` and `WEB_ENABLED=true`.
 
 ```bash
 npm run build
@@ -152,6 +157,8 @@ npm run build
 DATABASE_PATH=/data/hera.db DISCORD_GUILD_ID=your-server-id WEB_PORT=8080 WEB_ENABLED=true npm run web
 # Or in the bot process.
 DISCORD_TOKEN=... DISCORD_GUILD_ID=... WEB_ENABLED=true WEB_PORT=8080 npm start
+# On a host that injects PORT, this is enough:
+DISCORD_TOKEN=... DISCORD_GUILD_ID=... PORT=10000 npm start
 ```
 
 Either way the site is strictly read-only — there is no trading over HTTP.
@@ -196,8 +203,14 @@ runs the bot and serves the dashboard on the same port, with a persistent disk a
 
 One service, not two, because **a Render persistent disk can be attached to only
 one service at a time** — a separate dashboard service could not read the bot's
-SQLite file. Since the bot process is long-running and binds `WEB_PORT`, the web
+SQLite file. Since the bot process is long-running and binds a port, the web
 service shape fits it exactly.
+
+Render injects `PORT` (default `10000`) and routes inbound traffic *and the health
+check* to that exact port, so the bot binds `PORT`. Do not add `WEB_PORT` in the
+Render dashboard: `PORT` takes precedence, and a hard-coded `WEB_PORT` that
+disagrees with `PORT` is the usual cause of a deploy failing with *no open ports
+detected*.
 
 1. Create a Blueprint from this repository and let Render read `render.yaml`.
 2. Fill in the `sync: false` secrets: `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, and
