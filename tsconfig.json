@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": [
+      "ES2023"
+    ],
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "hera/**/*.ts",
+    "dashboard/**/*.ts",
+    "tests/**/*.ts"
+  ]
+}
