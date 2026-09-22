@@ -1,9 +1,9 @@
 # Hera
 
-A multipurpose economy Discord bot. This repository currently implements the
-**stock market system** end to end: a simulated exchange with 20 fictional
-listings, order execution, portfolios, and a full wallet/bank economy
-underneath it.
+A multipurpose economy Discord bot, written in TypeScript. This repository
+implements the **stock market system** end to end: a simulated exchange with 20
+fictional listings, order execution, portfolios, and a full wallet/bank economy
+underneath it — plus a read-only web dashboard.
 
 ## What is in here
 
@@ -39,16 +39,19 @@ underneath it.
 - PNG price charts (with your average cost overlaid), multi-stock comparison
   charts and a portfolio allocation donut.
 - Paginated embeds for the stock board.
+- A read-only web dashboard with SVG charts, served on its own port.
 
 ## Quick start
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
+npm install
 cp .env.example .env        # then set DISCORD_TOKEN
-python -m hera
+npm run dev                 # or: npm run build && npm start
 ```
+
+Requires **Node 22.5 or newer**: the database uses the built-in `node:sqlite`
+module and the charts use a prebuilt `@napi-rs/canvas` binary, so there is no
+native build step.
 
 The bot needs the **Message Content** intent because every command also has a
 prefix form (see below). Set `DISCORD_GUILD_ID` to register commands instantly in
@@ -60,10 +63,36 @@ one server instead of waiting for global propagation.
 
 Set `STOCK_NEWS_CHANNEL_ID` to have market headlines posted to a channel.
 
+### Commands are one file each
+
+Every command is a single TypeScript file under `hera/commands/<category>/`, and
+each file declares **both** its slash command and its prefix command. There is no
+second registration step: the loader walks the category folders at startup, so
+adding a command means adding a file.
+
+```ts
+// hera/commands/market/quote.ts
+import { symbolArg, type CommandDefinition } from '../../framework/types';
+
+export const command: CommandDefinition = {
+  name: 'quote',
+  category: 'market',
+  description: 'Show a full quote for one listing.',
+  args: [symbolArg('symbol', 'Ticker or company name.', symbolAutocomplete(), { required: true })],
+  async execute(ctx, args, services) {
+    // ctx is the same for a slash interaction and for a `!quote NOVA` message.
+    // services holds the market, trading and economy services.
+  },
+};
+```
+
+To add a casino game later, drop `hera/commands/casino/blackjack.ts` next to the
+existing folders — nothing else needs editing. (No casino commands ship today.)
+
 ### Commands work two ways
 
 Every command is available as a slash command and as a prefixed message command.
-Both run the same code, so the behaviour is identical:
+Both run the same `execute`, so the behaviour is identical:
 
 ```
 /market            !market
@@ -85,9 +114,6 @@ why.
 Use `/help` (or `!help`) for a paginated directory of every command, and
 `/help <command>` to read one in detail. `/markethelp` explains the simulation.
 
-Adding a new command needs only the slash version; its prefix twin is generated
-automatically.
-
 ### Configuration
 
 Every knob has a sane default and is overridable in `.env`:
@@ -98,7 +124,8 @@ Every knob has a sane default and is overridable in `.env`:
 | `DISCORD_GUILD_ID` | global | Register slash commands in one guild |
 | `STOCK_NEWS_CHANNEL_ID` | — | Channel for market news |
 | `COMMAND_PREFIX` | `!` | Prefix for message commands |
-| `WEB_ENABLED` | `false` | Serve the read-only web dashboard |
+| `HERA_OWNER_ID` | guild owner | User allowed to run operator commands |
+| `WEB_ENABLED` | `false` | Also serve the read-only dashboard |
 | `WEB_BIND_HOST` | `0.0.0.0` | Interface the dashboard binds |
 | `WEB_PORT` | `8080` | Dashboard port |
 | `DATABASE_PATH` | `data/hera.db` | SQLite file |
@@ -106,59 +133,28 @@ Every knob has a sane default and is overridable in `.env`:
 | `STOCK_TICK_SECONDS` | `300` | Seconds between market ticks |
 
 Deeper tuning (volatility, commission, slippage, collateral ratio, event rates)
-lives in `hera/config.py`.
-
-## Deploying to Northflank
-
-The `Dockerfile` builds a self-contained image. With `WEB_ENABLED` left off there
-is no Render-style port binding to configure, because the bot is only a gateway
-client. Turn the dashboard on and you must publish `WEB_PORT` (8080 by default,
-already `EXPOSE`d) and set the service's health check to `/healthz`.
-
-### Build and run locally
-
-```bash
-docker build -t hera-bot .
-docker run --rm -it \
-  -e DISCORD_TOKEN=your-token \
-  -e DISCORD_GUILD_ID=your-server-id \
-  -e WEB_ENABLED=true \
-  -p 8080:8080 \
-  -v hera-data:/data \
-  hera-bot
-```
-
-Then open <http://localhost:8080/>.
-
-### On Northflank
-
-1. Create a **service** from this repository and let it build with the
-   `Dockerfile` (Deployment > Build > Dockerfile).
-2. Set the environment variables `DISCORD_TOKEN`, `DISCORD_GUILD_ID` and
-   `STOCK_NEWS_CHANNEL_ID` as secrets. Do not bake them into the image.
-3. **Add a persistent volume mounted at `/data`.** This is the step that matters
-   most: the SQLite file holding every balance and portfolio lives there.
-   Without it the economy resets on every deploy, restart and scale-down.
-
-The mount path and `DATABASE_PATH` must agree. The image already defaults to
-`/data/hera.db`; only override `DATABASE_PATH` if you mount the volume elsewhere
-(and keep it *inside* the mount path).
-
-The image runs as uid/gid `10001`. Northflank assigns volume ownership to the
-group configured in the image, so keep that group unless you also change the
-Dockerfile. If a volume comes back owned by a different group and the bot cannot
-write to `/data`, override the entrypoint with `bin/bash -c` and
-`chown -R 10001:10001 /data && exec python -m hera`.
-
-The container stops gracefully: `hera/__main__.py` installs a `SIGTERM` handler
-that cancels the market ticker and closes the database before exiting. SQLite
-runs in WAL mode, so committed ticks survive even an abrupt kill.
+lives in `hera/config.ts`.
 
 ## Web dashboard
 
-Set `WEB_ENABLED=true` and the bot also serves a small read-only site on the same
-event loop, sharing its database and market service. It is the same exchange the
-Discord commands drive, just in a browser.
+The dashboard is a read-only view over the same SQLite file the bot writes to.
+It can run in one of two ways:
+
+- **In the bot process** — set `WEB_ENABLED=true` and the bot also serves the
+  dashboard on `WEB_PORT`, sharing its live market and one database handle. This
+  is what `render.yaml` deploys.
+- **As its own process** — `npm run web` opens the database itself and serves the
+  site on `WEB_PORT`.
+
+```bash
+npm run build
+# Standalone.
+DATABASE_PATH=/data/hera.db DISCORD_GUILD_ID=your-server-id WEB_PORT=8080 WEB_ENABLED=true npm run web
+# Or in the bot process.
+DISCORD_TOKEN=... DISCORD_GUILD_ID=... WEB_ENABLED=true WEB_PORT=8080 npm start
+```
+
+Either way the site is strictly read-only — there is no trading over HTTP.
 
 ```
 http://localhost:8080/           overview: index, movers, wire, sector heatmap
@@ -183,21 +179,78 @@ JSON endpoints, if you would rather build your own front end:
 | `GET /api/charts/index.svg` | The market index chart as SVG |
 | `GET /healthz` | Liveness plus the current tick |
 
-Charts are rendered server-side. The Discord side emits PNGs through matplotlib;
-the dashboard emits SVG so the graphs stay sharp at any width and work with
-JavaScript disabled. The sparkline beside each listing is embedded as a data URI,
-and the API is a single JSON document with no second request.
+Charts are rendered server-side. The Discord side emits PNGs through
+`@napi-rs/canvas`; the dashboard emits SVG (`dashboard/charts.ts`) so the graphs
+stay sharp at any width and work with JavaScript disabled. The sparkline beside
+each listing is embedded as a data URI, and the API is a single JSON document
+with no second request.
 
-The dashboard never writes to the database — there is no trading over HTTP. It
-shows one guild's market: `DISCORD_GUILD_ID` if set, otherwise the first guild
-the bot is in.
+The dashboard shows one guild's market: `DISCORD_GUILD_ID` if set, otherwise
+start-up fails with a message telling you to set it.
+
+## Deploying to Render
+
+`render.yaml` is a blueprint for this deployment: a single **web service** that
+runs the bot and serves the dashboard on the same port, with a persistent disk at
+`/data`.
+
+One service, not two, because **a Render persistent disk can be attached to only
+one service at a time** — a separate dashboard service could not read the bot's
+SQLite file. Since the bot process is long-running and binds `WEB_PORT`, the web
+service shape fits it exactly.
+
+1. Create a Blueprint from this repository and let Render read `render.yaml`.
+2. Fill in the `sync: false` secrets: `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, and
+   `STOCK_NEWS_CHANNEL_ID` if you want the news wire.
+3. Render attaches the disk and sets `DATABASE_PATH=/data/hera.db`.
+
+If you would rather split the bot and the dashboard, run them as two services with
+a shared Postgres instead of a disk — but note the dashboard's service layer reads
+SQLite, so that is a larger change.
+
+The mount path and `DATABASE_PATH` must agree. The image defaults to
+`/data/hera.db`; only override `DATABASE_PATH` if you mount the disk elsewhere
+(and keep it *inside* the mount path).
+
+Because the disk makes deploys non-zero-downtime, Render stops the old instance
+before starting the new one. The container handles `SIGTERM`: the dashboard stops
+first, then the market ticker is cancelled and the database closed. SQLite runs in
+WAL mode, so committed ticks survive even an abrupt kill.
+
+The image runs as uid/gid `10001`, and Render chowns the disk to that group
+automatically, so the database is writable on first boot.
+
+### Build and run with Docker
+
+```bash
+docker build -t hera-bot .
+
+# Bot plus dashboard in one container.
+docker run --rm -it \
+  -e DISCORD_TOKEN=your-token \
+  -e DISCORD_GUILD_ID=your-server-id \
+  -e WEB_ENABLED=true \
+  -p 8080:8080 \
+  -v hera-data:/data \
+  hera-bot
+
+# Dashboard only, from the same image.
+docker run --rm -it \
+  -e DISCORD_GUILD_ID=your-server-id \
+  -e WEB_ENABLED=true \
+  -p 8080:8080 \
+  -v hera-data:/data \
+  hera-bot node --disable-warning=ExperimentalWarning dist/dashboard/index.js
+```
+
+Then open <http://localhost:8080/>.
 
 ## Commands
 
 Every command below works with a `/` or the `!` prefix. Arguments are shown
-without the sigil.
+without the sigil. Each is one file: the path in brackets is where it lives.
 
-**Market**
+**Market** — `hera/commands/market/`
 
 | Command | What it does |
 | --- | --- |
@@ -209,11 +262,6 @@ without the sigil.
 | `sectors` | Sector performance heatmap |
 | `news` | Latest headlines |
 | `markethelp` | Paginated guide to how the market works |
-
-**Trading**
-
-| Command | What it does |
-| --- | --- |
 | `buy <symbol> <qty>` | Market buy |
 | `sell <symbol> <qty\|all>` | Market sell |
 | `short <symbol> <qty>` | Open a short with collateral |
@@ -224,22 +272,21 @@ without the sigil.
 | `position <symbol>` | Drill into one position |
 | `allocation` | Allocation donut chart |
 | `traders` | Net-worth leaderboard |
+| `alert <symbol> <above\|below> <price>` | Set a price alert |
+| `alerts`, `unalert <id>` | Manage alerts |
+| `watch <add\|remove> <symbol>`, `watchlist` | Manage the watchlist |
 
-**Alerts and watches**
-
-`alert <symbol> <above\|below> <price>`, `alerts`, `unalert <id>`,
-`watch <add\|remove> <symbol>`, `watchlist`
-
-**Economy**
+**Economy** — `hera/commands/economy/`
 
 `balance [member]`, `work`, `daily`, `deposit`, `withdraw`, `pay`,
 `bankupgrade`, `rob`, `history`, `richest`
 
-**Admin** (Manage Server)
+**Admin** — `hera/commands/admin/` (Manage Server)
 
 `tick [count]` advances the market by hand — useful for testing.
+`wipe` clears a member's account, for operators.
 
-**Help**
+**Help** — `hera/commands/help/`
 
 `help [command]` lists every command, grouped by category, with one detail page
 per command.
@@ -268,67 +315,80 @@ the market's character.
 
 The growth dial is finely balanced against volatility drag: the bear regime
 carries a higher volatility multiplier, which pulls the index down. Above a
-certain drift the market inflates without bound; below it, it bleeds out.
-`test_long_run_market_stays_within_a_healthy_band` guards this, simulating a
-month of ticks across several seeds.
+certain drift the market inflates without bound; below it, it bleeds out. The
+long-run engine test simulates a month of ticks and asserts the index stays in a
+healthy band.
 
 ## Architecture
 
 ```
 hera/
-  bot.py            Bot wiring, background ticker, DM dispatch, error handling
-  __main__.py       Entrypoint and SIGTERM/SIGINT shutdown handling
-  config.py         All tunable settings
-  context.py        One command body, both Discord front ends
-  database.py       Schema + async SQLite wrapper
-  errors.py         Domain errors mapped to user-facing messages
-  formatting.py     Money/percent/duration rendering
-  parsing.py        "25k" / "all" argument parsing
+  index.ts          Entrypoint, SIGTERM/SIGINT shutdown
+  bot.ts            Bot wiring, background ticker, prefix dispatch, error handling
+  config.ts         All tunable settings
+  database.ts       Schema + node:sqlite wrapper
+  errors.ts         Domain errors mapped to user-facing messages
+  formatting.ts     Money/percent/duration rendering
+  parsing.ts        "25k" / "all" argument parsing
+  framework/
+    types.ts        The CommandDefinition model shared by every command file
+    context.ts      One command body, both Discord front ends
+    register.ts     Definition -> slash payload, prefix parsing and dispatch
+    registry.ts     Discovers hera/commands/<category>/*.ts
+    autocomplete.ts Live ticker suggestions (slash only)
+    helpers.ts      Shared error/argument plumbing
   market/
-    companies.py    The 20 listings
-    events.py       Headline templates
-    engine.py       Price simulation (pure, seedable)
+    companies.ts    The 20 listings
+    events.ts       Headline templates
+    engine.ts       Price simulation (pure, seedable)
+    random.ts       Seeded RNG
   services/
-    economy.py      Wallets, bank, cooldowns, ledger
-    market.py       Engine persistence and queries
-    trading.py      Order execution, positions, orders, alerts
+    economy.ts      Wallets, bank, cooldowns, ledger
+    market.ts       Engine persistence and queries
+    trading.ts      Order execution, positions, orders, alerts
   ui/
-    charts.py       matplotlib PNG rendering
-    embeds.py       Embeds, paginator, confirmation view
-    guide.py        The market explainer pages
-  cogs/
-    economy.py      Currency commands
-    stocks.py       Exchange commands
-    admin.py        Manual tick controls
-    help.py         Command directory
-  web/
-    server.py       aiohttp routes for the dashboard and JSON API
-    service.py      Read-only market snapshots serialised to JSON
-    charts.py       Hand-rolled SVG charts (matplotlib is PNG-only)
-    static/         The two pages, stylesheet and front-end script
+    charts.ts       PNG rendering via @napi-rs/canvas
+    embeds.ts       Embeds, paginator, confirmation view
+    views.ts        Interactive component registry
+    guide.ts        The market explainer pages
+  events/
+    index.ts        Guild join/leave wiring
+    marketevents.ts Tick results rendered into Discord messages
+  commands/
+    market/*.ts     One file per exchange command
+    economy/*.ts    One file per currency command
+    admin/*.ts      Operator controls
+    help/*.ts       The command directory
+
+dashboard/
+  index.ts          Entrypoint (`npm run web`)
+  server.ts         HTTP routes for the pages, JSON API and SVG charts
+  service.ts        Read-only market snapshots serialised to JSON
+  charts.ts         Hand-rolled SVG charts
+  static/           The two pages, stylesheet and front-end script
+
+tests/              node:test suites, run with `npm test`
 ```
 
 ### How one command serves two front ends
 
-A slash command receives an `Interaction`, a message command receives a
-`commands.Context`, and the two share almost nothing. Rather than write every
-command twice, `hera/context.py` adapts both onto a `CommandContext`, and the
-command bodies talk only to that.
+A slash command receives a `ChatInputCommandInteraction`, a prefix command
+receives a `Message`, and the two share almost nothing. Rather than write every
+command twice, `hera/framework/context.ts` adapts both onto a `CommandContext`,
+and command bodies talk only to that.
 
-`@bind_contexts` on a cog then derives a prefixed twin for each slash command. The
-twin shares the callback, so the logic cannot drift, and the translation is limited
-to the public shape: `Choice` parameters become `Literal`s (so `!limit` accepts only
-the same four sides the slash command offers), and autocomplete-only conveniences
-are simply absent. Failures on either front end reach `HeraBot.on_command_error`,
-which reports a domain error, a mistyped argument and an unexpected crash in the
-same shape.
+`framework/register.ts` then builds the Discord slash payload from each
+definition and resolves prefix invocations from message text against the same
+definitions. Fixed-choice arguments are validated locally for prefix users, and
+user arguments accept a mention or a raw id. The translation is limited to the
+public shape of the command, so the logic cannot drift apart.
 
 The one honest asymmetry is ephemerality: a message command cannot reply
-privately, so `PrefixContext` sends those answers as direct messages and falls back
-to a clearly-labelled channel post when DMs are closed.
+privately, so `PrefixContext` sends those answers as direct messages and falls
+back to a clearly-labelled channel post when DMs are closed.
 
-`MarketEngine` is pure and takes an injected `random.Random`, so a seeded run
-replays exactly — that is what makes the simulation testable.
+`MarketEngine` takes an injected `Random`, so a seeded run replays exactly — that
+is what makes the simulation testable.
 
 All money movements are journalled in `transactions`, and the ledger sums to the
 member's total balance. Tests assert this after a busy trading session.
@@ -336,16 +396,19 @@ member's total balance. Tests assert this after a busy trading session.
 ## Tests
 
 ```bash
-pip install pytest pytest-asyncio
-python -m pytest
+npm test              # all suites
+npm run typecheck     # tsc --noEmit
 ```
 
-The suite covers the price engine (bounds, determinism, regimes, dividends,
-circuit breakers, long-run balance), trading (fills, weighted average cost,
-partial sells, shorts, collateral, limit-order reservation and refunds, expiry,
-alerts), the economy (cooldowns, streaks, bank capacity, ledger reconciliation),
-the parsers and formatters, and the command layer (both context adapters, ephemeral
-fallback, and the generated prefix twins), and the web dashboard. The web suite
-drives a real aiohttp test client against the live routes, checks the SVGs are
-well-formed, confirms the payloads agree with the market, and asserts no route
-mutates the database. It runs against a real temporary SQLite database — nothing is mocked.
+The suite uses `node:test` through `tsx` and covers the price engine (bounds,
+determinism, regimes, dividends, circuit breakers, long-run balance), trading
+(fills, weighted average cost, partial sells, shorts, collateral, limit-order
+reservation and refunds, expiry, alerts), the economy (cooldowns, streaks, bank
+capacity, ledger reconciliation), the parsers and formatters, the wiring layer
+(slash/prefix argument parity, the help directory and its pagination), and the
+web dashboard. The web suite drives real HTTP requests against a live dashboard
+bound to an ephemeral port, checks the SVGs are well-formed, confirms the
+payloads agree with the market, and asserts no route mutates the database.
+
+Tests run against a real temporary SQLite database and the real services — there
+are no mocks.

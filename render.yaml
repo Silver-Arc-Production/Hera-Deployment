@@ -1,0 +1,34 @@
+# Render blueprint: a single web service running the bot, which also serves the
+# read-only dashboard on its port (WEB_ENABLED=true).
+#
+# One service rather than two, because a Render persistent disk can be attached
+# to only one service -- a separate dashboard service could not read the same
+# SQLite file. The bot process is long-running and binds the port, so the web
+# service shape fits it, and `healthCheckPath` keeps the deploy green only once
+# the dashboard is answering.
+services:
+  - type: web
+    name: hera
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node --disable-warning=ExperimentalWarning dist/hera/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_PATH
+        value: /data/hera.db
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: STOCK_NEWS_CHANNEL_ID
+        sync: false
+      - key: WEB_ENABLED
+        value: "true"
+      - key: WEB_BIND_HOST
+        value: 0.0.0.0
+      - key: WEB_PORT
+        value: "8080"
+    disk:
+      name: hera-data
+      mountPath: /data
+      sizeGB: 1

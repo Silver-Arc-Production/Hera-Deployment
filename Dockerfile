@@ -1,57 +1,61 @@
 # syntax=docker/dockerfile:1
 
-# Pin the interpreter: the test suite is validated against this minor version.
-FROM python:3.13-slim
+# The bot and the dashboard are both Node. `node:sqlite` needs Node 22.5+, and
+# this glibc image is what the prebuilt @napi-rs/canvas binary links against, so
+# no compiler or system library install is required.
+FROM node:22-bookworm-slim
 
-# PYTHONUNBUFFERED keeps logs streaming a line at a time, which is what
-# Northflank's log view expects; without it output sits in a buffer for minutes.
-# MPLBACKEND is belt-and-braces alongside the Agg backend set in hera/ui/charts.py.
-# The cache directories are redirected to /tmp because the runtime user has no
-# home directory and matplotlib would otherwise warn on every chart.
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    MPLBACKEND=Agg \
-    MPLCONFIGDIR=/tmp/matplotlib \
-    XDG_CACHE_HOME=/tmp \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# NODE_ENV stays unset until after the build: typescript and tsx are dev
+# dependencies, and `npm ci` skips them when NODE_ENV=production. The dashboard
+# port is read from WEB_PORT at runtime.
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false
 
 WORKDIR /app
 
 # Dependencies first: editing application code then doesn't invalidate this
-# layer. matplotlib ships manylinux wheels, so no compiler is needed.
-COPY requirements.txt ./
-RUN pip install -r requirements.txt
+# layer. `npm ci` is reproducible from the lockfile checked into the repo.
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# The runtime user is created before the application is copied so the sources
-# can be owned by it in one step. Northflank grants ownership of an attached
-# volume to the group configured in the image (see "Add a persistent volume"),
-# so this gid is what the volume gets chowned to.
+# Everything the compiler and the runtime read.
+COPY tsconfig.json tsconfig.build.json ./
+COPY hera/ ./hera/
+COPY dashboard/ ./dashboard/
+COPY scripts/ ./scripts/
+
+# `npm prune` drops typescript and tsx once dist/ exists, so the runtime image
+# carries only the shipped dependencies.
+RUN npm run build \
+ && npm prune --omit=dev \
+ && npm cache clean --force
+
+# The runtime user is created after the sources are copied so they can be
+# chowned in one step. A platform that mounts a disk grants ownership of it to
+# the group configured in the image, so this gid is what the disk gets chowned to.
 RUN groupadd --gid 10001 hera \
- && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin hera
-
-COPY --chown=hera:hera hera/ ./hera/
-
-# The dashboard binds a port, so the container is no longer gateway-only. That
-# port must be published and mapped to WEB_PORT by the platform.
-EXPOSE 8080
-
-# chmod is explicit because COPY preserves the source file modes: a contributor
-# building from a checkout with a restrictive umask would otherwise produce an
-# image whose own source files the runtime user cannot read.
-RUN chmod -R a+rX /app/hera \
+ && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin hera \
+ && chmod -R a+rX /app/hera /app/dashboard /app/dist /app/node_modules \
  && mkdir -p /data \
  && chown -R hera:hera /data
 
-# The SQLite file holding every balance and position. Northflank must mount a
-# persistent volume at /data, otherwise each redeploy resets the whole economy.
+# The dashboard binds a port, so a deployment that serves it must publish this.
+EXPOSE 8080
+
+# The SQLite file holding every balance and position. A host that wants durable
+# data must mount a persistent volume at /data, otherwise each redeploy resets
+# the whole economy.
 VOLUME ["/data"]
-ENV DATABASE_PATH=/data/hera.db
+ENV DATABASE_PATH=/data/hera.db \
+    NODE_ENV=production
 
 USER 10001:10001
 
-# Docker sends SIGTERM on stop/restart, and hera/__main__.py turns that into a
-# graceful shutdown: the ticker is cancelled and the database is closed before
-# the process exits. SQLite's WAL mode makes even an abrupt kill safe, so no
-# committed tick is lost either way.
-CMD ["python", "-m", "hera"]
+# CMD starts the bot, which also serves the dashboard when WEB_ENABLED=true.
+# `dockerCommand` can instead run `node dist/dashboard/index.js` for a
+# dashboard-only container. Docker sends SIGTERM on stop/restart, and both
+# entrypoints turn that into a graceful shutdown: the dashboard stops, then the
+# ticker is cancelled and the database closed. SQLite's WAL mode makes even an
+# abrupt kill safe, so no committed tick is lost either way.
+CMD ["node", "--disable-warning=ExperimentalWarning", "dist/hera/index.js"]
