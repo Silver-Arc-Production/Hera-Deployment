@@ -8,7 +8,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { join } from 'node:path';
-import type { Message } from 'discord.js';
+import { GatewayIntentBits, type Message } from 'discord.js';
 
 import {
   buildSlashData,
@@ -192,6 +192,18 @@ test('the service facade exposes the live command index', () => {
   // Shape check only: this is what bot.ts hands to every command body.
   const services = { commandIndex: index } as unknown as CommandServices;
   assert.equal(services.commandIndex.commands.size, commands.length);
+});
+
+test('the bot subscribes to the intents prefix commands need', () => {
+  // Prefix commands arrive as MESSAGE_CREATE, which Discord only delivers when
+  // GuildMessages is requested. MessageContent alone is not enough -- it fills in
+  // the text of an event that GuildMessages gates. Requesting only the latter
+  // boots and serves slash commands while every typed command stays invisible.
+  const bot = new HeraBot({}, ':memory:');
+  const intents = bot.options.intents;
+  assert.equal(intents.has(GatewayIntentBits.GuildMessages), true);
+  assert.equal(intents.has(GatewayIntentBits.MessageContent), true);
+  void bot.shutdown();
 });
 
 test('the bot hands its live services to the dashboard', async () => {
