@@ -9,7 +9,7 @@
 import { EmbedBuilder } from 'discord.js';
 
 import { config } from '../config';
-import { percent, price, signed } from '../formatting';
+import { percent, price, shares, signed } from '../formatting';
 import type { TickResult } from '../market/engine';
 import type { AlertHit, Fill, MarginCall } from '../services/trading';
 
@@ -61,7 +61,7 @@ export function marginCallEmbedFor(call: MarginCall): EmbedBuilder {
   return new EmbedBuilder()
     .setTitle(`\u26A0\uFE0F Margin call on ${call.symbol}`)
     .setDescription(
-      `Your short of ${call.quantity.toLocaleString()} ${call.symbol} is down ` +
+      `Your short of ${shares(call.quantity)} ${call.symbol} is down ` +
         `${call.loss.toFixed(2)} against ${call.collateral.toLocaleString()} of collateral.\n` +
         `Entry ${price(call.entry)} \u2192 now ${price(call.price)}.\n` +
         'Cover the position or post more collateral.',

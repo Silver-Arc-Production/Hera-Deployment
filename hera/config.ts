@@ -19,7 +19,7 @@ export interface EconomyConfig {
 export interface MarketConfig {
   tickSeconds: number;
   historyLimit: number;
-  /** Ticks per trading session. At the default 300s tick this is a 2-hour day. */
+  /** Ticks per simulated day, used only to roll the daily open/high/low. */
   sessionTicks: number;
   startingIndex: number;
   meanReversion: number;
@@ -31,17 +31,15 @@ export interface MarketConfig {
   eventTicksMax: number;
   regimeMinTicks: number;
   regimeMaxTicks: number;
-  circuitBreakerDrop: number;
-  haltTicks: number;
   dividendTickInterval: number;
 }
 
+/**
+ * Order execution is commission-free and fills at the exact live price, the way
+ * a retail fractional-share broker works. The only risk control left is the
+ * collateral a short must post.
+ */
 export interface TradingConfig {
-  commissionRate: number;
-  commissionMin: number;
-  commissionMax: number;
-  slippageCoefficient: number;
-  maxSlippage: number;
   minShortCollateralRatio: number;
   marginCallRatio: number;
   limitOrderExpiryTicks: number;
@@ -160,18 +158,11 @@ export const marketDefaults: MarketConfig = {
   eventTicksMax: 12,
   regimeMinTicks: 20,
   regimeMaxTicks: 70,
-  circuitBreakerDrop: 0.22,
-  haltTicks: 3,
   dividendTickInterval: 120,
 };
 
 /** Default trading tuning, exported so tests can build configs without env vars. */
 export const tradingDefaults: TradingConfig = {
-  commissionRate: 0.0025,
-  commissionMin: 1,
-  commissionMax: 5_000,
-  slippageCoefficient: 0.35,
-  maxSlippage: 0.12,
   minShortCollateralRatio: 1.5,
   marginCallRatio: 0.75,
   limitOrderExpiryTicks: 240,

@@ -3,8 +3,8 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
 import { InvalidOrder } from '../hera/errors';
-import { compact, duration, money, percent, price, progressBar, signed } from '../hera/formatting';
-import { parseAmount, parsePrice } from '../hera/parsing';
+import { compact, duration, money, percent, price, progressBar, shares, signed } from '../hera/formatting';
+import { parseAmount, parseOrderSize, parsePrice } from '../hera/parsing';
 
 const amountCases: [string, number][] = [
   ['10', 10],
@@ -13,6 +13,8 @@ const amountCases: [string, number][] = [
   ['2.5m', 2_500_000],
   ['1b', 1_000_000_000],
   ['  42  ', 42],
+  ['0.5', 0.5],
+  ['1.25', 1.25],
 ];
 
 for (const [raw, expected] of amountCases) {
@@ -23,8 +25,17 @@ for (const [raw, expected] of amountCases) {
 
 test('parseAmount supports all and half', () => {
   assert.equal(parseAmount('all', 100), 100);
-  assert.equal(parseAmount('half', 101), 50);
+  // Fractions are allowed, so half of an odd maximum stays exact.
+  assert.equal(parseAmount('half', 101), 50.5);
   assert.equal(parseAmount('max', 7), 7);
+});
+
+test('parseOrderSize reads a dollar amount as a currency value', () => {
+  assert.deepEqual(parseOrderSize('$50'), { value: 50 });
+  assert.deepEqual(parseOrderSize('$1,250.50'), { value: 1250.5 });
+  assert.deepEqual(parseOrderSize('10'), { quantity: 10 });
+  assert.deepEqual(parseOrderSize('0.5'), { quantity: 0.5 });
+  assert.deepEqual(parseOrderSize('all', 12), { quantity: 12 });
 });
 
 for (const raw of ['', 'abc', '1.2.3', '--5', '5x']) {
@@ -68,6 +79,13 @@ test('price adapts precision to magnitude', () => {
   assert.equal(price(0.5), '0.5000');
   assert.equal(price(12.5), '12.500');
   assert.equal(price(1234.5), '1,234.50');
+});
+
+test('shares formats fractional share counts', () => {
+  assert.equal(shares(10), '10');
+  assert.equal(shares(0.5), '0.5');
+  assert.equal(shares(1234.25), '1,234.25');
+  assert.equal(shares(1_000_000), '1,000,000');
 });
 
 test('signed always shows a sign', () => {

@@ -22,6 +22,12 @@ export function price(amount: number): string {
   return group(amount, 2);
 }
 
+/** Format a share count, which may be fractional, trimming trailing zeroes. */
+export function shares(quantity: number): string {
+  const trimmed = Math.round(quantity * 1e6) / 1e6;
+  return trimmed.toLocaleString('en-US', { maximumFractionDigits: 6 });
+}
+
 /** Format a value with an explicit +/- sign. */
 export function signed(
   amount: number,

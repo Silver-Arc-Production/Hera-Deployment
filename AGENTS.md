@@ -68,6 +68,29 @@ Python left in the tree, so do not look for `requirements.txt`, `pytest.ini` or
 - `node scripts/copy-assets.mjs` and `tsconfig.build.json` are both required by
   the Dockerfile build stage; keep them in the `COPY` list.
 
+## Market and trading model
+
+- The market is a continuous, always-open simulation. There are **no trading
+  sessions and no circuit breakers**: `MarketEngine.advance()` never halts a
+  listing, and no halt column or `MarketHalted` error exists. Do not reintroduce
+  `circuitBreakerDrop`, `haltTicks` or `halted_until_tick`.
+- `sessionTicks` still exists, but only to decide when the *reporting day* rolls
+  over (resetting `previousClose`/`openPrice`/`dayHigh`/`dayLow`). It does not
+  gate trading.
+- Execution is commission-free and fills at the exact live price: no commission
+  or slippage config, and `estimateExecutionPrice` returns the live price with a
+  zero slippage component.
+- Share quantities are **fractional**, stored as `REAL` in `positions`,
+  `short_positions` and `orders`, and rounded to six decimal places by
+  `roundShares`/`SHARE_PRECISION` in `hera/services/trading.ts`. Cash is still
+  whole credits: buys round the total up and sells round proceeds down, so a
+  round trip costs at most one credit.
+- `/buy` and `/sell` accept either a share count (fractions allowed) or a dollar
+  amount prefixed with `$`. `parseOrderSize` in `hera/parsing.ts` distinguishes
+  the two; `buyByValue`/`sellByValue` size the order at the live price.
+- Format share counts with `shares()` from `hera/formatting.ts`, never
+  `toLocaleString()` directly, so fractions render correctly.
+
 ## Conventions
 
 - Style: 2-space indent, single quotes, semicolons, ~100 column lines.

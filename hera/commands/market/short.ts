@@ -4,7 +4,7 @@ import { symbolAutocomplete } from '../../framework/autocomplete';
 import { withHeraErrors } from '../../framework/helpers';
 import { symbolArg, stringArg, type CommandDefinition } from '../../framework/types';
 import { HeraError } from '../../errors';
-import { money, price } from '../../formatting';
+import { money, price, shares } from '../../formatting';
 import { parseAmount } from '../../parsing';
 import { tradeResultEmbed } from '../../ui/embeds';
 
@@ -14,7 +14,7 @@ export const command: CommandDefinition = {
   description: 'Open a short position with posted collateral.',
   args: [
     symbolArg('symbol', 'Ticker or company name.', symbolAutocomplete(), { required: true }),
-    stringArg('quantity', 'How many shares to short.', { required: true, example: '5' }),
+    stringArg('quantity', 'Shares to short (fractions allowed).', { required: true, example: '5' }),
   ],
   async execute(ctx, args, services) {
     const requested = String(args.symbol);
@@ -33,10 +33,9 @@ export const command: CommandDefinition = {
           description: fill.message,
           color: config.errorColor,
           fields: [
-            ['Shares', fill.quantity.toLocaleString()],
+            ['Shares', shares(fill.quantity)],
             ['Entry price', price(fill.price)],
-            ['Commission', money(fill.commission)],
-            ['Slippage', `${fill.slippagePct.toFixed(2)}%`],
+            ['Position value', money(fill.gross)],
           ],
         }).setFooter({
           text: 'Profit if the price falls. Collateral is returned when you cover.',

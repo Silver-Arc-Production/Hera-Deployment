@@ -29,7 +29,6 @@ export interface StockRow {
   dividend_yield: number;
   volatility: number;
   beta: number;
-  halted: boolean;
   sector_beta: number;
   history_tick_start: number | null;
   sparkline: string;
@@ -46,7 +45,6 @@ export interface MarketPayload {
     gainers: number;
     losers: number;
     unchanged: number;
-    halted: number;
   };
   sectors: { sector: string; change_pct: number; count: number }[];
   stocks: StockRow[];
@@ -99,7 +97,6 @@ export class DashboardService {
         dividend_yield: company.dividendYield,
         volatility: company.volatility,
         beta: company.beta,
-        halted: company.isHalted,
         sector_beta: SECTOR_BETA[company.sector] ?? 1.0,
         history_tick_start: history.length > 0 ? history[0][0] : null,
         sparkline: chartDataUri(renderSparkline(prices)),
@@ -126,7 +123,6 @@ export class DashboardService {
         gainers,
         losers,
         unchanged: rows.length - gainers - losers,
-        halted: rows.filter((row) => row.halted).length,
       },
       sectors,
       stocks: rows,

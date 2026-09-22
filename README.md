@@ -14,13 +14,16 @@ underneath it — plus a read-only web dashboard.
 - A price engine that runs on a background tick: geometric random walk, mean
   reversion to a drifting fair value, sector and company news events, and
   bull/neutral/bear market regimes that scale each stock by its beta.
-- Circuit breakers that halt a listing after a sharp collapse.
+- A market that never closes and never halts: no sessions and no circuit
+  breakers, so any listing is tradable at any moment.
 - Dividends that go ex-div on a schedule and pay every long holder.
 - A market index, sector heatmap, news wire and a rolling price history.
 
 **Trading**
 
-- Market buy and sell, with commission and size-dependent slippage.
+- Market buy and sell, commission-free and filling at the exact live price, in
+  whole shares or fractions of one.
+- Buy or sell by dollar amount — `/buy NOVA $50` — the way a retail app works.
 - Short selling with posted collateral, plus a margin-call warning when a
   short moves against you.
 - Resting limit orders for buy/sell/short/cover, with cash reservation, expiry
@@ -132,7 +135,7 @@ Every knob has a sane default and is overridable in `.env`:
 | `CURRENCY_SYMBOL` / `CURRENCY_NAME` | `🪙` / `credits` | Display currency |
 | `STOCK_TICK_SECONDS` | `300` | Seconds between market ticks |
 
-Deeper tuning (volatility, commission, slippage, collateral ratio, event rates)
+Deeper tuning (volatility, collateral ratio, event rates, dividend cadence)
 lives in `hera/config.ts`.
 
 ## Web dashboard
@@ -414,9 +417,9 @@ npm run typecheck     # tsc --noEmit
 ```
 
 The suite uses `node:test` through `tsx` and covers the price engine (bounds,
-determinism, regimes, dividends, circuit breakers, long-run balance), trading
-(fills, weighted average cost, partial sells, shorts, collateral, limit-order
-reservation and refunds, expiry, alerts), the economy (cooldowns, streaks, bank
+determinism, regimes, dividends, long-run balance), trading
+(fills, fractional shares, dollar-sized orders, weighted average cost, partial
+sells, shorts, collateral, limit-order reservation and refunds, expiry, alerts), the economy (cooldowns, streaks, bank
 capacity, ledger reconciliation), the parsers and formatters, the wiring layer
 (slash/prefix argument parity, the help directory and its pagination), and the
 web dashboard. The web suite drives real HTTP requests against a live dashboard

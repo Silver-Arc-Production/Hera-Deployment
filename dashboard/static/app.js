@@ -64,7 +64,7 @@ async function renderOverview() {
   setText("regime", data.regime);
   setText("tick", "tick " + data.tick.toLocaleString());
   setText("breadth", `${data.totals.gainers} / ${data.totals.losers}`);
-  setText("breadth-sub", `${data.totals.unchanged} unchanged · ${data.totals.halted} halted`);
+  setText("breadth-sub", `${data.totals.unchanged} unchanged`);
   setText("market-cap", formatCompact(data.totals.market_cap));
   setText("listing-count", `${data.totals.listings} listings`);
   setText("generated-at", "updated " + new Date(data.generated_at).toLocaleString());
@@ -149,7 +149,7 @@ function renderStocks() {
       .map(
         (row) => `
         <tr data-symbol="${row.symbol}">
-          <td class="ticker">${row.symbol}${row.halted ? ' <span class="badge halt">halted</span>' : ""}</td>
+          <td class="ticker">${row.symbol}</td>
           <td class="name">${row.name}</td>
           <td class="muted">${row.sector}</td>
           <td>${formatPrice(row.price)}</td>

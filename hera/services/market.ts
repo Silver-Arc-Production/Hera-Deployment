@@ -33,7 +33,6 @@ interface CompanyRow {
   beta: number;
   shares_outstanding: number;
   dividend_yield: number;
-  halted_until_tick: number;
   active_event: string | null;
   event_ticks_left: number;
   event_magnitude: number;
@@ -96,7 +95,6 @@ export class MarketService {
       state.dayHigh = Number(row.day_high);
       state.dayLow = Number(row.day_low);
       state.fairValue = Number(row.price);
-      state.haltedUntilTick = Number(row.halted_until_tick);
       state.activeEvent = row.active_event;
       state.eventTicksLeft = Number(row.event_ticks_left);
       state.eventMagnitude = Number(row.event_magnitude);
@@ -169,7 +167,7 @@ export class MarketService {
       this.db.executemany(
         `UPDATE companies SET
             price = ?, previous_close = ?, open_price = ?, day_high = ?, day_low = ?,
-            market_cap = ?, halted_until_tick = ?, active_event = ?, event_ticks_left = ?,
+            market_cap = ?, active_event = ?, event_ticks_left = ?,
             event_magnitude = ?, last_dividend_tick = ?
          WHERE symbol = ?`,
         Object.values(engine.companies).map((company) => [
@@ -179,7 +177,6 @@ export class MarketService {
           company.dayHigh,
           company.dayLow,
           company.marketCap,
-          company.haltedUntilTick,
           company.activeEvent,
           company.eventTicksLeft,
           company.eventMagnitude,

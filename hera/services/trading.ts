@@ -5,8 +5,11 @@
  * -----------
  * * All cash movements go through :class:`EconomyService` so they are journalled
  *   in ``transactions``.
- * * Execution uses the *live* price from the engine plus slippage proportional to
- *   order size relative to average volume, so large orders visibly cost more.
+ * * Execution fills at the *live* price with no commission and no slippage, the
+ *   way a retail fractional-share broker works: the price on the screen is the
+ *   price you get. Quantities are fractional, to six decimal places.
+ * * A buy or sell can be sized in shares (``0.5``) or in credits (``$50``); the
+ *   credit form converts to shares at the live price.
  * * Shorts are tracked in ``short_positions`` separately from longs, with cash
  *   collateral posted on open and returned on cover.
  */
@@ -18,16 +21,21 @@ import {
   InsufficientFunds,
   InsufficientShares,
   InvalidOrder,
-  MarketHalted,
   UnknownSymbol,
 } from '../errors';
+import { shares } from '../formatting';
 import type { CompanyState } from '../market/engine';
 import type { EconomyService } from './economy';
 import type { MarketService } from './market';
 
-/** Typical daily volume per company, used to size slippage. Expressed as a
- * fraction of shares outstanding so it scales with the float. */
-const TURNOVER_FRACTION = 0.004;
+/** Fractional shares are tracked to six decimal places, like a real broker. */
+export const SHARE_PRECISION = 6;
+
+/** Round a share quantity to the supported precision, avoiding float drift. */
+export function roundShares(quantity: number): number {
+  const factor = 10 ** SHARE_PRECISION;
+  return Math.round(quantity * factor) / factor;
+}
 
 export type OrderSide = 'buy' | 'sell' | 'short' | 'cover';
 
@@ -89,8 +97,6 @@ export interface Fill {
   quantity: number;
   price: number;
   gross: number;
-  commission: number;
-  slippagePct: number;
   realizedPnl: number;
   message: string;
 }
@@ -184,34 +190,20 @@ export class TradingService {
 
   // ---------------------------------------------------------------- pricing
 
-  private static averageDailyVolume(company: CompanyState): number {
-    return Math.max(1_000.0, company.sharesOutstanding * TURNOVER_FRACTION);
-  }
-
   /**
-   * Return [price, slippageFraction] for an order of ``quantity`` shares.
+   * The price an order of ``quantity`` shares fills at: the live price, always.
    *
-   * Slippage grows with the square root of order size relative to typical volume
-   * -- the standard market-impact shape -- and is capped so an enormous order
-   * cannot produce an absurd fill.
+   * There is no slippage and no spread, so a fractional order and a huge order
+   * both deal at the number on the quote. ``side`` is accepted for parity with
+   * callers but no longer changes the result.
    */
   estimateExecutionPrice(
     company: CompanyState,
-    quantity: number,
-    side: 'buy' | 'sell',
+    _quantity: number,
+    _side: 'buy' | 'sell',
   ): [number, number] {
-    const adv = TradingService.averageDailyVolume(company);
-    const ratio = Math.max(0.0, quantity / adv);
-    const impact = Math.min(this.config.maxSlippage, this.config.slippageCoefficient * Math.sqrt(ratio));
-    const direction = side === 'buy' ? 1.0 : -1.0;
-    const price = company.price * (1 + direction * impact);
-    return [Math.max(0.01, price), impact];
-  }
-
-  commissionFor(gross: number): number {
-    const raw = gross * this.config.commissionRate;
-    const rounded = Math.round(raw);
-    return Math.trunc(Math.max(this.config.commissionMin, Math.min(this.config.commissionMax, rounded)));
+    const price = Math.max(0.01, company.price);
+    return [price, 0.0];
   }
 
   // ------------------------------------------------------------------ reads
@@ -291,22 +283,28 @@ export class TradingService {
 
   // ----------------------------------------------------------------- buying
 
+  /**
+   * Buy ``quantity`` shares at the live price.
+   *
+   * ``quantity`` may be fractional. Cash leaves the wallet in whole credits,
+   * rounded up so the house never undercharges for a fractional purchase.
+   */
   buy(userId: string, guildId: string, symbol: string, quantity: number): Fill {
-    if (quantity <= 0) throw new InvalidOrder('Quantity must be a positive whole number.');
+    quantity = roundShares(quantity);
+    if (quantity <= 0) throw new InvalidOrder('Quantity must be greater than zero.');
     const company = this.requireTradable(guildId, symbol);
     symbol = company.symbol;
 
-    const [execPrice, slippage] = this.estimateExecutionPrice(company, quantity, 'buy');
+    const [execPrice] = this.estimateExecutionPrice(company, quantity, 'buy');
     const gross = execPrice * quantity;
-    const commission = this.commissionFor(gross);
-    const total = Math.ceil(gross) + commission;
+    const total = Math.ceil(gross);
 
     const account = this.economy.getAccount(userId, guildId);
     if (account.wallet < total) throw new InsufficientFunds(total, account.wallet);
 
     this.economy.debit(userId, guildId, total, {
       kind: 'stock_buy',
-      note: `Bought ${quantity.toLocaleString()} ${symbol} @ ${execPrice.toFixed(2)}`,
+      note: `Bought ${shares(quantity)} ${symbol} @ ${execPrice.toFixed(2)}`,
     });
 
     this.db.transaction(() => {
@@ -321,7 +319,7 @@ export class TradingService {
         const oldCost = Number(row.average_cost);
         const newQty = oldQty + quantity;
         // Weighted average cost, so partial sells keep an honest basis.
-        const newCost = (oldQty * oldCost + quantity * execPrice) / newQty;
+        const newCost = newQty > 0 ? (oldQty * oldCost + quantity * execPrice) / newQty : execPrice;
         this.db.execute(
           `UPDATE positions SET quantity = ?, average_cost = ?, updated_at = unixepoch('subsec')
            WHERE user_id = ? AND guild_id = ? AND symbol = ?`,
@@ -336,17 +334,35 @@ export class TradingService {
       quantity,
       price: execPrice,
       gross,
-      commission,
-      slippagePct: slippage * 100,
       realizedPnl: 0,
-      message: `Bought ${quantity.toLocaleString()} ${symbol} at ${execPrice.toFixed(2)}`,
+      message: `Bought ${shares(quantity)} ${symbol} at ${execPrice.toFixed(2)}`,
     };
+  }
+
+  /**
+   * Buy as many shares as ``credits`` will pay for at the live price.
+   *
+   * This is the ``/buy NOVA $50`` form: the order is sized in currency, not
+   * shares. The quantity is floored so the fill never costs more than the amount
+   * the user named.
+   */
+  buyByValue(userId: string, guildId: string, symbol: string, credits: number): Fill {
+    if (!(credits > 0)) throw new InvalidOrder('Amount must be greater than zero.');
+    const company = this.requireTradable(guildId, symbol);
+    const spend = Math.ceil(credits);
+    const account = this.economy.getAccount(userId, guildId);
+    if (account.wallet < spend) throw new InsufficientFunds(spend, account.wallet);
+    const unit = this.estimateExecutionPrice(company, 0, 'buy')[0];
+    const quantity = Math.floor((credits / unit) * 10 ** SHARE_PRECISION) / 10 ** SHARE_PRECISION;
+    if (quantity <= 0) throw new InvalidOrder('Amount is too small to buy a fraction of a share.');
+    return this.buy(userId, guildId, symbol, quantity);
   }
 
   // ----------------------------------------------------------------- selling
 
   sell(userId: string, guildId: string, symbol: string, quantity: number): Fill {
-    if (quantity <= 0) throw new InvalidOrder('Quantity must be a positive whole number.');
+    quantity = roundShares(quantity);
+    if (quantity <= 0) throw new InvalidOrder('Quantity must be greater than zero.');
     const company = this.requireTradable(guildId, symbol);
     symbol = company.symbol;
 
@@ -355,15 +371,14 @@ export class TradingService {
       throw new InsufficientShares(symbol, quantity, position ? position.quantity : 0);
     }
 
-    const [execPrice, slippage] = this.estimateExecutionPrice(company, quantity, 'sell');
+    const [execPrice] = this.estimateExecutionPrice(company, quantity, 'sell');
     const gross = execPrice * quantity;
-    const commission = this.commissionFor(gross);
-    const proceeds = Math.floor(gross) - commission;
-    const realized = Math.round((execPrice - position.averageCost) * quantity) - commission;
+    const proceeds = Math.floor(gross);
+    const realized = Math.round((execPrice - position.averageCost) * quantity);
 
     this.db.transaction(() => {
-      const remaining = position.quantity - quantity;
-      if (remaining === 0) {
+      const remaining = roundShares(position.quantity - quantity);
+      if (remaining <= 0) {
         this.db.execute(
           `UPDATE positions SET quantity = 0, average_cost = 0,
               realized_pnl = realized_pnl + ?, updated_at = unixepoch('subsec')
@@ -382,7 +397,7 @@ export class TradingService {
 
     this.economy.credit(userId, guildId, Math.max(0, proceeds), {
       kind: 'stock_sell',
-      note: `Sold ${quantity.toLocaleString()} ${symbol} @ ${execPrice.toFixed(2)}`,
+      note: `Sold ${shares(quantity)} ${symbol} @ ${execPrice.toFixed(2)}`,
     });
 
     return {
@@ -391,11 +406,29 @@ export class TradingService {
       quantity,
       price: execPrice,
       gross,
-      commission,
-      slippagePct: slippage * 100,
       realizedPnl: realized,
-      message: `Sold ${quantity.toLocaleString()} ${symbol} at ${execPrice.toFixed(2)}`,
+      message: `Sold ${shares(quantity)} ${symbol} at ${execPrice.toFixed(2)}`,
     };
+  }
+
+  /**
+   * Sell enough shares to realise roughly ``credits``, at the live price.
+   *
+   * This is the ``/sell NOVA $50`` form. The quantity is capped at what the user
+   * holds and floored to the supported precision.
+   */
+  sellByValue(userId: string, guildId: string, symbol: string, credits: number): Fill {
+    if (!(credits > 0)) throw new InvalidOrder('Amount must be greater than zero.');
+    const company = this.requireTradable(guildId, symbol);
+    const position = this.getPosition(userId, guildId, symbol);
+    if (!position || position.quantity <= 0) {
+      throw new InsufficientShares(company.symbol, 1, 0);
+    }
+    const unit = this.estimateExecutionPrice(company, 0, 'sell')[0];
+    const wanted = Math.floor((credits / unit) * 10 ** SHARE_PRECISION) / 10 ** SHARE_PRECISION;
+    const quantity = Math.min(wanted, position.quantity);
+    if (quantity <= 0) throw new InvalidOrder('Amount is too small to sell a fraction of a share.');
+    return this.sell(userId, guildId, symbol, quantity);
   }
 
   // ------------------------------------------------------------------ shorts
@@ -406,7 +439,8 @@ export class TradingService {
   }
 
   short(userId: string, guildId: string, symbol: string, quantity: number): Fill {
-    if (quantity <= 0) throw new InvalidOrder('Quantity must be a positive whole number.');
+    quantity = roundShares(quantity);
+    if (quantity <= 0) throw new InvalidOrder('Quantity must be greater than zero.');
     const company = this.requireTradable(guildId, symbol);
     symbol = company.symbol;
 
@@ -414,12 +448,11 @@ export class TradingService {
     const account = this.economy.getAccount(userId, guildId);
     if (account.wallet < collateral) throw new InsufficientCollateral(collateral, account.wallet);
 
-    const [execPrice, slippage] = this.estimateExecutionPrice(company, quantity, 'sell');
-    const commission = this.commissionFor(execPrice * quantity);
+    const [execPrice] = this.estimateExecutionPrice(company, quantity, 'sell');
 
-    this.economy.debit(userId, guildId, collateral + commission, {
+    this.economy.debit(userId, guildId, collateral, {
       kind: 'short_open',
-      note: `Collateral for ${quantity.toLocaleString()} ${symbol} short`,
+      note: `Collateral for ${shares(quantity)} ${symbol} short`,
     });
 
     this.db.transaction(() => {
@@ -435,7 +468,7 @@ export class TradingService {
         const oldQty = Number(row.quantity);
         const oldPrice = Number(row.average_price);
         const newQty = oldQty + quantity;
-        const newPrice = (oldQty * oldPrice + quantity * execPrice) / newQty;
+        const newPrice = newQty > 0 ? (oldQty * oldPrice + quantity * execPrice) / newQty : execPrice;
         this.db.execute(
           `UPDATE short_positions SET quantity = ?, average_price = ?, collateral = collateral + ?,
               updated_at = unixepoch('subsec')
@@ -451,15 +484,14 @@ export class TradingService {
       quantity,
       price: execPrice,
       gross: execPrice * quantity,
-      commission,
-      slippagePct: slippage * 100,
       realizedPnl: 0,
-      message: `Shorted ${quantity.toLocaleString()} ${symbol} at ${execPrice.toFixed(2)} with ${collateral.toLocaleString()} collateral`,
+      message: `Shorted ${shares(quantity)} ${symbol} at ${execPrice.toFixed(2)} with ${collateral.toLocaleString()} collateral`,
     };
   }
 
   cover(userId: string, guildId: string, symbol: string, quantity: number): Fill {
-    if (quantity <= 0) throw new InvalidOrder('Quantity must be a positive whole number.');
+    quantity = roundShares(quantity);
+    if (quantity <= 0) throw new InvalidOrder('Quantity must be greater than zero.');
     const company = this.requireTradable(guildId, symbol);
     symbol = company.symbol;
 
@@ -468,18 +500,17 @@ export class TradingService {
       throw new InsufficientShares(symbol, quantity, short ? short.quantity : 0);
     }
 
-    const [execPrice, slippage] = this.estimateExecutionPrice(company, quantity, 'buy');
+    const [execPrice] = this.estimateExecutionPrice(company, quantity, 'buy');
     const gross = execPrice * quantity;
-    const commission = this.commissionFor(gross);
-    const realized = Math.round((short.averagePrice - execPrice) * quantity) - commission;
+    const realized = Math.round((short.averagePrice - execPrice) * quantity);
 
     // Release the proportional share of posted collateral.
     let released = Math.trunc(short.collateral * (quantity / short.quantity));
-    if (quantity === short.quantity) released = short.collateral;
+    if (quantity >= short.quantity) released = short.collateral;
 
     this.db.transaction(() => {
-      const remaining = short.quantity - quantity;
-      if (remaining === 0) {
+      const remaining = roundShares(short.quantity - quantity);
+      if (remaining <= 0) {
         this.db.execute(
           `UPDATE short_positions SET quantity = 0, average_price = 0, collateral = 0,
               realized_pnl = realized_pnl + ?, updated_at = unixepoch('subsec')
@@ -499,7 +530,7 @@ export class TradingService {
     // Collateral returns to the wallet; the P/L is settled from it.
     this.economy.credit(userId, guildId, Math.max(0, released + realized), {
       kind: 'short_cover',
-      note: `Covered ${quantity.toLocaleString()} ${symbol} @ ${execPrice.toFixed(2)}`,
+      note: `Covered ${shares(quantity)} ${symbol} @ ${execPrice.toFixed(2)}`,
     });
 
     return {
@@ -508,10 +539,8 @@ export class TradingService {
       quantity,
       price: execPrice,
       gross,
-      commission,
-      slippagePct: slippage * 100,
       realizedPnl: realized,
-      message: `Covered ${quantity.toLocaleString()} ${symbol} at ${execPrice.toFixed(2)}`,
+      message: `Covered ${shares(quantity)} ${symbol} at ${execPrice.toFixed(2)}`,
     };
   }
 
@@ -526,7 +555,7 @@ export class TradingService {
     quantity: number,
     limitPrice: number,
   ): number {
-    if (quantity <= 0) throw new InvalidOrder('Quantity must be a positive whole number.');
+    if (!(quantity > 0)) throw new InvalidOrder('Quantity must be greater than zero.');
     if (limitPrice <= 0) throw new InvalidOrder('Limit price must be greater than zero.');
     const normalizedSide = side.toLowerCase();
     if (!['buy', 'sell', 'short', 'cover'].includes(normalizedSide)) {
@@ -545,7 +574,7 @@ export class TradingService {
       if (account.wallet < reservation) throw new InsufficientFunds(reservation, account.wallet);
       this.economy.debit(userId, guildId, reservation, {
         kind: 'order_reserve',
-        note: `Reserved for ${normalizedSide} ${quantity.toLocaleString()} ${company.symbol}`,
+        note: `Reserved for ${normalizedSide} ${shares(quantity)} ${company.symbol}`,
       });
     } else if (normalizedSide === 'sell') {
       const position = this.getPosition(userId, guildId, company.symbol);
@@ -558,7 +587,7 @@ export class TradingService {
       if (account.wallet < collateral) throw new InsufficientCollateral(collateral, account.wallet);
       this.economy.debit(userId, guildId, collateral, {
         kind: 'order_reserve',
-        note: `Reserved for short ${quantity.toLocaleString()} ${company.symbol}`,
+        note: `Reserved for short ${shares(quantity)} ${company.symbol}`,
       });
     }
 
@@ -609,7 +638,6 @@ export class TradingService {
         this.cancelOrderRow(orderId, 'expired', true);
         continue;
       }
-      if (company.haltedUntilTick > engine.tick) continue;
 
       // A buy fills when the market trades at or below the limit.
       const marketPrice = company.price;
@@ -840,13 +868,16 @@ export class TradingService {
         [guildId, symbol],
       );
       for (const row of rows) {
-        const amount = Number(row.quantity) * perShare;
-        if (amount <= 0) continue;
+        const raw = Number(row.quantity) * perShare;
+        // Pay in whole credits, and never zero for a real holding: the smallest
+        // buy already costs one credit, so a one-credit floor cannot be farmed.
+        const payout = raw > 0 ? Math.max(1, Math.trunc(raw)) : 0;
+        if (payout <= 0) continue;
         const userId = String(row.user_id);
-        payouts[userId] = (payouts[userId] ?? 0) + amount;
-        this.economy.credit(userId, guildId, Math.max(1, Math.trunc(amount)), {
+        payouts[userId] = (payouts[userId] ?? 0) + payout;
+        this.economy.credit(userId, guildId, payout, {
           kind: 'dividend',
-          note: `Dividend on ${Number(row.quantity).toLocaleString()} ${symbol}`,
+          note: `Dividend on ${shares(Number(row.quantity))} ${symbol}`,
         });
       }
     }
@@ -935,8 +966,6 @@ export class TradingService {
   private requireTradable(guildId: string, symbol: string): CompanyState {
     const company = this.market.resolveSymbol(guildId, symbol);
     if (!company) throw new UnknownSymbol(symbol);
-    const engine = this.market.getEngine(guildId);
-    if (company.haltedUntilTick > engine.tick) throw new MarketHalted(company.symbol);
     return company;
   }
 

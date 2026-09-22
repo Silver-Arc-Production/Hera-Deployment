@@ -102,7 +102,7 @@ test('dividends pay out and reduce price', () => {
   }
 });
 
-test('the circuit breaker halts a collapsing stock', () => {
+test('a collapsing stock keeps trading through the drop', () => {
   const market = engine();
   const company = market.companies.NOVA;
   company.previousClose = company.price;
@@ -111,16 +111,17 @@ test('the circuit breaker halts a collapsing stock', () => {
   // Drop the live price far below the previous close, then tick once more.
   company.price = company.previousClose * 0.5;
   market.advance();
-  assert.ok(company.haltedUntilTick > market.tick);
+  assert.ok(company.dayChangeFraction < -0.2, 'expected a deep drawdown');
+  assert.ok(Number.isFinite(company.price) && company.price > 0);
 });
 
-test('a halted company does not move', () => {
+test('there is no circuit breaker to freeze a stock', () => {
   const market = engine();
   const company = market.companies.TERA;
-  company.haltedUntilTick = market.tick + 5;
-  const frozen = company.price;
+  company.price = company.previousClose * 0.1;
+  const before = company.price;
   market.advance();
-  assert.equal(company.price, frozen);
+  assert.notEqual(company.price, before, 'price must keep moving even after a crash');
 });
 
 test('events are generated and decay', () => {
