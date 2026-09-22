@@ -15,6 +15,7 @@ from .formatting import money, percent, price, signed
 from .services.economy import EconomyService
 from .services.market import MarketService
 from .services.trading import TradingService
+from .web import Dashboard
 
 log = logging.getLogger("hera")
 
@@ -54,6 +55,7 @@ class HeraBot(commands.Bot):
         self.economy = EconomyService(self.db)
         self.market = MarketService(self.db, config.market)
         self.trading = TradingService(self.db, self.economy, self.market, config.trading)
+        self.web: Dashboard | None = None
         self._last_tick_at = 0.0
         self._known_guilds: set[int] = set()
 
@@ -81,15 +83,42 @@ class HeraBot(commands.Bot):
 
         self.market_ticker.start()
 
+    async def _start_dashboard(self) -> None:
+        """Bind the dashboard once the guild list is known.
+
+        Deferred to :meth:`on_ready` on purpose: ``setup_hook`` runs before the
+        gateway connects, so ``self.guilds`` is still empty there. ``on_ready``
+        can fire more than once per process, hence the ``self.web`` guard.
+        """
+        if not config.web.enabled or self.web is not None:
+            return
+        # The dashboard is read-only, so it borrows the primary guild's market.
+        # ``_known_guilds`` is consulted last so a market already ticked from a
+        # cached guild still gets a dashboard before ``self.guilds`` is filled.
+        guild_id = (
+            config.guild_id
+            or (self.guilds[0].id if self.guilds else None)
+            or (sorted(self._known_guilds)[0] if self._known_guilds else None)
+        )
+        if guild_id is None:
+            log.warning("WEB_ENABLED is set but the bot is in no guilds; dashboard not started")
+            return
+        dashboard = Dashboard(self.market, guild_id=guild_id)
+        await dashboard.start(host=config.web.host, port=config.web.port)
+        self.web = dashboard
+
     async def close(self) -> None:
         if self.market_ticker.is_running():
             self.market_ticker.cancel()
+        if self.web is not None:
+            await self.web.stop()
         await self.db.close()
         await super().close()
 
     async def on_ready(self) -> None:
         log.info("logged in as %s (%s)", self.user, self.user.id if self.user else "?")
         self._known_guilds = {guild.id for guild in self.guilds}
+        await self._start_dashboard()
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching, name="the Hera exchange"

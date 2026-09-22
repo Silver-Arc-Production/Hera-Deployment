@@ -100,6 +100,15 @@ class TradingConfig:
 
 
 @dataclass(frozen=True)
+class WebConfig:
+    """Tuning for the read-only web dashboard served beside the bot."""
+
+    enabled: bool = field(default_factory=lambda: _env_bool("WEB_ENABLED", False))
+    host: str = field(default_factory=lambda: os.getenv("WEB_BIND_HOST", "0.0.0.0"))
+    port: int = field(default_factory=lambda: _env_int("WEB_PORT", 8080))
+
+
+@dataclass(frozen=True)
 class BotConfig:
     token: str = field(default_factory=lambda: os.getenv("DISCORD_TOKEN", ""))
     guild_id: int | None = field(
@@ -132,6 +141,7 @@ class BotConfig:
     economy: EconomyConfig = field(default_factory=EconomyConfig)
     market: MarketConfig = field(default_factory=MarketConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
+    web: WebConfig = field(default_factory=WebConfig)
 
     def validate(self) -> None:
         if not self.token:

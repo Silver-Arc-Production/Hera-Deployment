@@ -32,6 +32,10 @@ RUN groupadd --gid 10001 hera \
 
 COPY --chown=hera:hera hera/ ./hera/
 
+# The dashboard binds a port, so the container is no longer gateway-only. That
+# port must be published and mapped to WEB_PORT by the platform.
+EXPOSE 8080
+
 # chmod is explicit because COPY preserves the source file modes: a contributor
 # building from a checkout with a restrictive umask would otherwise produce an
 # image whose own source files the runtime user cannot read.

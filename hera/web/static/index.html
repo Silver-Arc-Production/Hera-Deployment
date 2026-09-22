@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hera — the exchange, on the web</title>
+    <meta
+      name="description"
+      content="Live view of the Hera exchange: index, sector heatmap, gainers and losers, and headlines."
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="site">
+      <div class="brand">HERA<span> ·</span> Exchange</div>
+      <nav>
+        <a href="/" class="active">Overview</a>
+        <a href="/stocks">Stocks</a>
+        <a href="/api/market">API</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>The Hera exchange</h1>
+      <p class="lede">
+        A live, read-only view of the simulated market running inside the Hera
+        Discord bot. Twenty invented listings, one price engine, and a new tick
+        every few minutes.
+      </p>
+
+      <section class="stats" id="headline-stats" aria-live="polite">
+        <div class="stat">
+          <div class="label">Index</div>
+          <div class="value" id="index-value">—</div>
+          <div class="sub" id="index-change">loading…</div>
+        </div>
+        <div class="stat">
+          <div class="label">Market regime</div>
+          <div class="value" id="regime">—</div>
+          <div class="sub" id="tick">tick —</div>
+        </div>
+        <div class="stat">
+          <div class="label">Breadth</div>
+          <div class="value" id="breadth">—</div>
+          <div class="sub" id="breadth-sub">gainers / losers</div>
+        </div>
+        <div class="stat">
+          <div class="label">Total market cap</div>
+          <div class="value" id="market-cap">—</div>
+          <div class="sub" id="listing-count">— listings</div>
+        </div>
+      </section>
+
+      <section class="chart-frame">
+        <img
+          id="index-chart"
+          src="/api/charts/index.svg"
+          alt="Hera Exchange index price chart"
+        />
+      </section>
+
+      <div class="hero">
+        <section>
+          <h2>Top movers</h2>
+          <div class="tile-grid" id="movers"></div>
+        </section>
+        <section>
+          <h2>Market wire</h2>
+          <div class="card">
+            <ul class="news" id="news">
+              <li class="muted small">Loading headlines…</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+
+      <h2>Sector heatmap</h2>
+      <div class="tile-grid" id="sectors"></div>
+
+      <h2>How to read this</h2>
+      <div class="card">
+        <p class="small muted">
+          Every listing moves each tick from drift, a market regime scaled by the
+          stock's beta, mean reversion toward fair value, news events and noise.
+          Circuit breakers halt a name after a sharp collapse. The dashboard is a
+          window onto that simulation — it reads the same database the Discord
+          commands do and never writes to it.
+        </p>
+      </div>
+    </main>
+
+    <footer class="site">
+      Hera economy bot · figures update on each market tick ·
+      <span id="generated-at">—</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+    <script>
+      renderOverview();
+    </script>
+  </body>
+</html>

@@ -98,6 +98,9 @@ Every knob has a sane default and is overridable in `.env`:
 | `DISCORD_GUILD_ID` | global | Register slash commands in one guild |
 | `STOCK_NEWS_CHANNEL_ID` | — | Channel for market news |
 | `COMMAND_PREFIX` | `!` | Prefix for message commands |
+| `WEB_ENABLED` | `false` | Serve the read-only web dashboard |
+| `WEB_BIND_HOST` | `0.0.0.0` | Interface the dashboard binds |
+| `WEB_PORT` | `8080` | Dashboard port |
 | `DATABASE_PATH` | `data/hera.db` | SQLite file |
 | `CURRENCY_SYMBOL` / `CURRENCY_NAME` | `🪙` / `credits` | Display currency |
 | `STOCK_TICK_SECONDS` | `300` | Seconds between market ticks |
@@ -107,8 +110,10 @@ lives in `hera/config.py`.
 
 ## Deploying to Northflank
 
-The `Dockerfile` builds a self-contained image; no Render-style port binding is
-involved because the bot is a gateway client.
+The `Dockerfile` builds a self-contained image. With `WEB_ENABLED` left off there
+is no Render-style port binding to configure, because the bot is only a gateway
+client. Turn the dashboard on and you must publish `WEB_PORT` (8080 by default,
+already `EXPOSE`d) and set the service's health check to `/healthz`.
 
 ### Build and run locally
 
@@ -117,9 +122,13 @@ docker build -t hera-bot .
 docker run --rm -it \
   -e DISCORD_TOKEN=your-token \
   -e DISCORD_GUILD_ID=your-server-id \
+  -e WEB_ENABLED=true \
+  -p 8080:8080 \
   -v hera-data:/data \
   hera-bot
 ```
+
+Then open <http://localhost:8080/>.
 
 ### On Northflank
 
@@ -144,6 +153,44 @@ write to `/data`, override the entrypoint with `bin/bash -c` and
 The container stops gracefully: `hera/__main__.py` installs a `SIGTERM` handler
 that cancels the market ticker and closes the database before exiting. SQLite
 runs in WAL mode, so committed ticks survive even an abrupt kill.
+
+## Web dashboard
+
+Set `WEB_ENABLED=true` and the bot also serves a small read-only site on the same
+event loop, sharing its database and market service. It is the same exchange the
+Discord commands drive, just in a browser.
+
+```
+http://localhost:8080/           overview: index, movers, wire, sector heatmap
+http://localhost:8080/stocks     every company stock, with a price graph
+```
+
+Pages:
+
+- **Overview** — index with its own chart, market regime, breadth, total market
+  cap, top movers, sector heatmap and the news wire.
+- **Stocks** — a sortable, filterable table of all 20 listings with price,
+  change, day range, market cap, dividend yield and a trend sparkline. Clicking a
+  row opens that company's full price chart.
+
+JSON endpoints, if you would rather build your own front end:
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /api/market` | The whole snapshot: index, sectors, stocks, news |
+| `GET /api/stocks` | Just the listings array |
+| `GET /api/charts/<symbol>.svg` | One listing's price chart as SVG |
+| `GET /api/charts/index.svg` | The market index chart as SVG |
+| `GET /healthz` | Liveness plus the current tick |
+
+Charts are rendered server-side. The Discord side emits PNGs through matplotlib;
+the dashboard emits SVG so the graphs stay sharp at any width and work with
+JavaScript disabled. The sparkline beside each listing is embedded as a data URI,
+and the API is a single JSON document with no second request.
+
+The dashboard never writes to the database — there is no trading over HTTP. It
+shows one guild's market: `DISCORD_GUILD_ID` if set, otherwise the first guild
+the bot is in.
 
 ## Commands
 
@@ -254,6 +301,11 @@ hera/
     stocks.py       Exchange commands
     admin.py        Manual tick controls
     help.py         Command directory
+  web/
+    server.py       aiohttp routes for the dashboard and JSON API
+    service.py      Read-only market snapshots serialised to JSON
+    charts.py       Hand-rolled SVG charts (matplotlib is PNG-only)
+    static/         The two pages, stylesheet and front-end script
 ```
 
 ### How one command serves two front ends
@@ -293,5 +345,7 @@ circuit breakers, long-run balance), trading (fills, weighted average cost,
 partial sells, shorts, collateral, limit-order reservation and refunds, expiry,
 alerts), the economy (cooldowns, streaks, bank capacity, ledger reconciliation),
 the parsers and formatters, and the command layer (both context adapters, ephemeral
-fallback, and the generated prefix twins). It runs against a real temporary SQLite
-database — nothing is mocked.
+fallback, and the generated prefix twins), and the web dashboard. The web suite
+drives a real aiohttp test client against the live routes, checks the SVGs are
+well-formed, confirms the payloads agree with the market, and asserts no route
+mutates the database. It runs against a real temporary SQLite database — nothing is mocked.
