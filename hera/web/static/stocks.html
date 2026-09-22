@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hera — all company stocks</title>
+    <meta
+      name="description"
+      content="Every Hera listing with live price, change, trend sparkline, market cap and dividend yield."
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="site">
+      <div class="brand">HERA<span> ·</span> Exchange</div>
+      <nav>
+        <a href="/">Overview</a>
+        <a href="/stocks" class="active">Stocks</a>
+        <a href="/api/market">API</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>All company stocks</h1>
+      <p class="lede">
+        Every listed company on the Hera exchange. Click a row to open its price
+        chart; sort any column by clicking its header.
+      </p>
+
+      <div class="controls">
+        <input
+          type="search"
+          id="filter"
+          placeholder="Filter by ticker, name or sector…"
+          aria-label="Filter listings"
+          autocomplete="off"
+        />
+        <select id="sector" aria-label="Filter by sector">
+          <option value="">All sectors</option>
+        </select>
+        <span class="muted small" id="count"></span>
+      </div>
+
+      <section class="chart-frame" id="detail-chart-frame" hidden>
+        <img id="detail-chart" alt="Selected company price chart" />
+        <p class="small muted" id="detail-meta" style="padding: 0.5rem 0.6rem"></p>
+      </section>
+
+      <div class="card" style="padding: 0.25rem 0.5rem">
+        <table id="stocks-table">
+          <thead>
+            <tr>
+              <th data-sort="symbol">Ticker</th>
+              <th data-sort="name">Company</th>
+              <th data-sort="sector">Sector</th>
+              <th data-sort="price">Price</th>
+              <th data-sort="change_pct">Change</th>
+              <th data-sort="day_low">Day range</th>
+              <th data-sort="market_cap">Market cap</th>
+              <th data-sort="dividend_yield">Yield</th>
+              <th>Trend</th>
+            </tr>
+          </thead>
+          <tbody id="stocks-body">
+            <tr>
+              <td colspan="9" class="muted">Loading listings…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+    <footer class="site">
+      Hera economy bot · all figures from the live simulation ·
+      <span id="generated-at">—</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+    <script>
+      renderStocks();
+    </script>
+  </body>
+</html>
