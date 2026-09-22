@@ -50,11 +50,43 @@ cp .env.example .env        # then set DISCORD_TOKEN
 python -m hera
 ```
 
-The bot needs the **Message Content** intent only if you add prefix commands;
-everything here is slash commands. Set `DISCORD_GUILD_ID` to register commands
-instantly in one server instead of waiting for global propagation.
+The bot needs the **Message Content** intent because every command also has a
+prefix form (see below). Set `DISCORD_GUILD_ID` to register commands instantly in
+one server instead of waiting for global propagation.
+
+> **Enable the Message Content intent** in the Discord Developer Portal
+> (Bot > Privileged Gateway Intents), or typed commands will not be delivered. If
+> you leave it off the bot still boots and slash commands still work.
 
 Set `STOCK_NEWS_CHANNEL_ID` to have market headlines posted to a channel.
+
+### Commands work two ways
+
+Every command is available as a slash command and as a prefixed message command.
+Both run the same code, so the behaviour is identical:
+
+```
+/market            !market
+/buy NOVA 10       !buy NOVA 10
+/limit buy NOVA 5 2500    !limit buy NOVA 5 2500
+/alert NOVA above 250     !alert NOVA above 250
+```
+
+The prefix defaults to `!` and is configurable with `COMMAND_PREFIX`. Prefix
+commands do not have Discord's autocomplete, so tickers and fixed-choice arguments
+are validated locally instead — `!limit` still only accepts `buy`, `sell`,
+`short` or `cover`, and tells you the accepted values if you mistype.
+
+Because a message command has no ephemeral replies, any command that answers
+privately (balances, order results, alerts) **direct messages you** instead. If
+your DMs are closed the answer is posted in the channel with a note explaining
+why.
+
+Use `/help` (or `!help`) for a paginated directory of every command, and
+`/help <command>` to read one in detail. `/markethelp` explains the simulation.
+
+Adding a new command needs only the slash version; its prefix twin is generated
+automatically.
 
 ### Configuration
 
@@ -65,6 +97,7 @@ Every knob has a sane default and is overridable in `.env`:
 | `DISCORD_TOKEN` | — | Bot token (required) |
 | `DISCORD_GUILD_ID` | global | Register slash commands in one guild |
 | `STOCK_NEWS_CHANNEL_ID` | — | Channel for market news |
+| `COMMAND_PREFIX` | `!` | Prefix for message commands |
 | `DATABASE_PATH` | `data/hera.db` | SQLite file |
 | `CURRENCY_SYMBOL` / `CURRENCY_NAME` | `🪙` / `credits` | Display currency |
 | `STOCK_TICK_SECONDS` | `300` | Seconds between market ticks |
@@ -114,46 +147,55 @@ runs in WAL mode, so committed ticks survive even an abrupt kill.
 
 ## Commands
 
+Every command below works with a `/` or the `!` prefix. Arguments are shown
+without the sigil.
+
 **Market**
 
 | Command | What it does |
 | --- | --- |
-| `/market` | Index, top movers, active stories |
-| `/list [sector]` | Paginated board of all 20 listings |
-| `/quote <symbol>` | Full quote, plus your position if you hold one |
-| `/chart <symbol> [points]` | Price chart with your average cost |
-| `/compare <symbols>` | Normalised performance of up to 5 stocks |
-| `/sectors` | Sector performance heatmap |
-| `/news` | Latest headlines |
+| `market` | Index, top movers, active stories |
+| `list [sector]` | Paginated board of all 20 listings |
+| `quote <symbol>` | Full quote, plus your position if you hold one |
+| `chart <symbol> [points]` | Price chart with your average cost |
+| `compare <symbols>` | Normalised performance of up to 5 stocks |
+| `sectors` | Sector performance heatmap |
+| `news` | Latest headlines |
+| `markethelp` | Paginated guide to how the market works |
 
 **Trading**
 
 | Command | What it does |
 | --- | --- |
-| `/buy <symbol> <qty>` | Market buy |
-| `/sell <symbol> <qty\|all>` | Market sell |
-| `/short <symbol> <qty>` | Open a short with collateral |
-| `/cover <symbol> <qty\|all>` | Close a short |
-| `/limit <side> <symbol> <qty> <price>` | Resting limit order |
-| `/orders`, `/cancel <id>` | Manage resting orders |
-| `/portfolio [member]` | Holdings, cash and P/L |
-| `/position <symbol>` | Drill into one position |
-| `/allocation` | Allocation donut chart |
-| `/traders` | Net-worth leaderboard |
+| `buy <symbol> <qty>` | Market buy |
+| `sell <symbol> <qty\|all>` | Market sell |
+| `short <symbol> <qty>` | Open a short with collateral |
+| `cover <symbol> <qty\|all>` | Close a short |
+| `limit <side> <symbol> <qty> <price>` | Resting limit order |
+| `orders`, `cancel <id>` | Manage resting orders |
+| `portfolio [member]` | Holdings, cash and P/L |
+| `position <symbol>` | Drill into one position |
+| `allocation` | Allocation donut chart |
+| `traders` | Net-worth leaderboard |
 
 **Alerts and watches**
 
-`/alert <symbol> <above\|below> <price>`, `/alerts`, `/unalert <id>`,
-`/watch <add\|remove> <symbol>`, `/watchlist`
+`alert <symbol> <above\|below> <price>`, `alerts`, `unalert <id>`,
+`watch <add\|remove> <symbol>`, `watchlist`
 
 **Economy**
 
-`/balance [member]`, `/work`, `/daily`, `/deposit`, `/withdraw`, `/pay`,
-`/bankupgrade`, `/rob`, `/history`, `/richest`
+`balance [member]`, `work`, `daily`, `deposit`, `withdraw`, `pay`,
+`bankupgrade`, `rob`, `history`, `richest`
 
 **Admin** (Manage Server)
 
-`/tick [count]` advances the market by hand — useful for testing.
+`tick [count]` advances the market by hand — useful for testing.
+
+**Help**
+
+`help [command]` lists every command, grouped by category, with one detail page
+per command.
 
 Quantity arguments accept `10`, `25k`, `2.5m`, `all` and `half`.
 
@@ -187,9 +229,10 @@ month of ticks across several seeds.
 
 ```
 hera/
-  bot.py            Bot wiring, background ticker, DM dispatch
+  bot.py            Bot wiring, background ticker, DM dispatch, error handling
   __main__.py       Entrypoint and SIGTERM/SIGINT shutdown handling
   config.py         All tunable settings
+  context.py        One command body, both Discord front ends
   database.py       Schema + async SQLite wrapper
   errors.py         Domain errors mapped to user-facing messages
   formatting.py     Money/percent/duration rendering
@@ -205,11 +248,32 @@ hera/
   ui/
     charts.py       matplotlib PNG rendering
     embeds.py       Embeds, paginator, confirmation view
+    guide.py        The market explainer pages
   cogs/
     economy.py      Currency commands
     stocks.py       Exchange commands
     admin.py        Manual tick controls
+    help.py         Command directory
 ```
+
+### How one command serves two front ends
+
+A slash command receives an `Interaction`, a message command receives a
+`commands.Context`, and the two share almost nothing. Rather than write every
+command twice, `hera/context.py` adapts both onto a `CommandContext`, and the
+command bodies talk only to that.
+
+`@bind_contexts` on a cog then derives a prefixed twin for each slash command. The
+twin shares the callback, so the logic cannot drift, and the translation is limited
+to the public shape: `Choice` parameters become `Literal`s (so `!limit` accepts only
+the same four sides the slash command offers), and autocomplete-only conveniences
+are simply absent. Failures on either front end reach `HeraBot.on_command_error`,
+which reports a domain error, a mistyped argument and an unexpected crash in the
+same shape.
+
+The one honest asymmetry is ephemerality: a message command cannot reply
+privately, so `PrefixContext` sends those answers as direct messages and falls back
+to a clearly-labelled channel post when DMs are closed.
 
 `MarketEngine` is pure and takes an injected `random.Random`, so a seeded run
 replays exactly — that is what makes the simulation testable.
@@ -227,6 +291,7 @@ python -m pytest
 The suite covers the price engine (bounds, determinism, regimes, dividends,
 circuit breakers, long-run balance), trading (fills, weighted average cost,
 partial sells, shorts, collateral, limit-order reservation and refunds, expiry,
-alerts), the economy (cooldowns, streaks, bank capacity, ledger reconciliation)
-and the parsers and formatters. It runs against a real temporary SQLite
+alerts), the economy (cooldowns, streaks, bank capacity, ledger reconciliation),
+the parsers and formatters, and the command layer (both context adapters, ephemeral
+fallback, and the generated prefix twins). It runs against a real temporary SQLite
 database — nothing is mocked.

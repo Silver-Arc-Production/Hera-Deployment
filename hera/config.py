@@ -121,6 +121,7 @@ class BotConfig:
             os.getenv("DATABASE_PATH", str(REPO_ROOT / "data" / "hera.db"))
         )
     )
+    prefix: str = field(default_factory=lambda: os.getenv("COMMAND_PREFIX", "!") or "!")
     currency_symbol: str = field(default_factory=lambda: os.getenv("CURRENCY_SYMBOL", "🪙"))
     currency_name: str = field(default_factory=lambda: os.getenv("CURRENCY_NAME", "credits"))
     embed_color: int = 0x2ECC71
@@ -137,6 +138,8 @@ class BotConfig:
             raise RuntimeError(
                 "DISCORD_TOKEN is not set. Copy .env.example to .env and fill it in."
             )
+        if not self.prefix.strip():
+            raise RuntimeError("COMMAND_PREFIX cannot be blank; leave it unset to use '!'.")
 
 
 config = BotConfig()
