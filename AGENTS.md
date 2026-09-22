@@ -26,6 +26,13 @@ Python left in the tree, so do not look for `requirements.txt`, `pytest.ini` or
 - A command body only ever sees `CommandContext`. Slash and prefix are adapted
   onto it in `hera/framework/context.ts`. Ephemeral replies become DMs for prefix
   users (there is no private reply for a message).
+- Prefix dispatch needs BOTH `GatewayIntentBits.GuildMessages` and
+  `GatewayIntentBits.MessageContent` in `hera/bot.ts`. `MessageContent` is
+  privileged and fills in the text, but `GuildMessages` is what makes Discord
+  deliver `MESSAGE_CREATE` at all. With only the former the bot boots and slash
+  commands work while every typed command is silently invisible. Also enable
+  Message Content in the Developer Portal, or Discord closes the socket.
+  `tests/test_wiring.ts` asserts both intents are requested.
 
 ## Build and test
 

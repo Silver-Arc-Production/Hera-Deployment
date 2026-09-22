@@ -76,9 +76,12 @@ export class HeraBot extends Client {
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
-        // Prefix commands read ordinary messages, which Discord gates behind the
-        // privileged Message Content intent. Without it the bot still boots and
-        // slash commands still work, but typed commands are invisible to it.
+        // Two intents gate prefix commands. GuildMessages is what makes Discord
+        // deliver MESSAGE_CREATE for guild channels at all; without it the bot
+        // still boots and slash commands still work, but typed commands never
+        // arrive. MessageContent is the privileged intent that fills in the
+        // message text once an event is delivered.
+        GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
       ],
