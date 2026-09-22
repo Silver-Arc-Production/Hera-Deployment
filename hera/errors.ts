@@ -44,12 +44,6 @@ export class UnknownSymbol extends HeraError {
   }
 }
 
-export class MarketHalted extends HeraError {
-  constructor(public readonly symbol: string) {
-    super(`trading in ${symbol} is halted by a circuit breaker`);
-  }
-}
-
 export class BankFull extends HeraError {
   constructor(public readonly capacity: number) {
     super(`bank capacity of ${capacity.toLocaleString()} reached`);

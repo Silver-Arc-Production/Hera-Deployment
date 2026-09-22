@@ -3,7 +3,7 @@ import { config } from '../../config';
 import { symbolAutocomplete } from '../../framework/autocomplete';
 import { withHeraErrors } from '../../framework/helpers';
 import { choiceArg, symbolArg, stringArg, type CommandDefinition } from '../../framework/types';
-import { price } from '../../formatting';
+import { price, shares } from '../../formatting';
 import { parseAmount, parsePrice } from '../../parsing';
 import { tradeResultEmbed } from '../../ui/embeds';
 
@@ -14,7 +14,7 @@ export const command: CommandDefinition = {
   args: [
     choiceArg('side', 'buy, sell, short or cover', ['buy', 'sell', 'short', 'cover'], { required: true }),
     symbolArg('symbol', 'Ticker or company name.', symbolAutocomplete(), { required: true }),
-    stringArg('quantity', 'How many shares.', { required: true, example: '5' }),
+    stringArg('quantity', 'Shares to trade (fractions allowed).', { required: true, example: '5' }),
     stringArg('limit_price', 'Only fill at this price or better.', { required: true, example: '2500' }),
   ],
   async execute(ctx, args, services) {
@@ -40,7 +40,7 @@ export const command: CommandDefinition = {
         tradeResultEmbed({
           title: '\u{1F9FE} Limit order placed',
           description:
-            `Order **#${order.orderId}**: ${side} ${order.quantity.toLocaleString()} ${symbol.toUpperCase()} ` +
+            `Order **#${order.orderId}**: ${side} ${shares(order.quantity)} ${symbol.toUpperCase()} ` +
             `at ${price(order.target)}`,
           color: config.embedColor,
           fields: [

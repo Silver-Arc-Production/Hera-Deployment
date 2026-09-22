@@ -240,11 +240,6 @@ tbody tr:hover {
   color: var(--muted);
 }
 
-.badge.halt {
-  border-color: var(--down);
-  color: var(--down);
-}
-
 .controls {
   display: flex;
   flex-wrap: wrap;

@@ -21,7 +21,7 @@ function ticksPerDay(): number {
   return config.market.sessionTicks;
 }
 
-/** Human-readable length of one trading session at the current tick rate. */
+/** Human-readable length of one simulated day at the current tick rate. */
 function sessionHours(): string {
   const seconds = ticksPerDay() * config.market.tickSeconds;
   if (seconds % 3600 === 0) return `${seconds / 3600} hours`;
@@ -46,9 +46,11 @@ export function guidePages(): GuidePage[] {
         `The exchange lists **${COMPANIES.length} fictional companies** across **${SECTORS.length} sectors**. ` +
         'All names and tickers are invented.\n\n' +
         'Everything is driven by a **tick** \u2014 one step of simulated time. ' +
-        `A tick runs every **${market.tickSeconds} seconds**, and **${ticksPerDay()} ticks** make up one trading day.\n\n` +
-        `At the default rate a full day is about **${sessionHours()}**. The market runs continuously while the ` +
-        'bot is online, so prices move even when nobody is watching. Use `/market` to catch up.',
+        `A tick runs every **${market.tickSeconds} seconds**, and **${ticksPerDay()} ticks** make up one reporting day ` +
+        `(about **${sessionHours()}**), which is the window the daily change and the day high/low cover.\n\n` +
+        'The market never closes and never halts. Prices move continuously while the bot is online, and you can ' +
+        'buy or sell any listing at any moment, however high or low its price happens to be. Use `/market` to ' +
+        'catch up.',
       fields: [
         [
           'The index',
@@ -96,11 +98,10 @@ export function guidePages(): GuidePage[] {
             'stay relevant for a while. Read them with `/news`.',
         ],
         [
-          'Limits and halts',
+          'Price limits',
           `No single tick can move a price more than ${percent(market.maxTickMove * 100, { signedOutput: false })} ` +
             '\u2014 this applies to the random component too, so a crash arrives as a series of bad ticks rather than ' +
-            `one. If a company falls ${percent(market.circuitBreakerDrop * 100, { signedOutput: false })} or more in a ` +
-            `day, trading in it **halts** for ${market.haltTicks} ticks and the price is frozen.`,
+            'one. There is no circuit breaker and no closing bell: a crashing stock keeps trading the whole way down.',
         ],
       ],
     },
@@ -108,25 +109,29 @@ export function guidePages(): GuidePage[] {
       title: '\u{1F4B8} Trading',
       description:
         'You trade against the market itself, not against other members. Fills are immediate at the live price, ' +
-        'adjusted for size and fees.',
+        'with no commission and no spread \u2014 the number on the quote is the number you get.',
       fields: [
         [
-          'Slippage',
-          'You never fill at the screen price if your order is large. Slippage grows with the square root of your ' +
-            "order size relative to the company's typical daily volume, and is capped at " +
-            `${percent(trading.maxSlippage * 100, { signedOutput: false })}. Splitting a huge order across ticks is ` +
-            'cheaper than sending it at once.',
+          'Fractional shares',
+          'You do not need to buy a whole share. Any order can be fractional, so `/buy NOVA 0.5` buys half a share ' +
+            'and is charged for half a share. Share counts are tracked to six decimal places.',
         ],
         [
-          'Commission',
-          `${percent(trading.commissionRate * 100, { signedOutput: false })} of the trade's value, with a minimum of ` +
-            `${trading.commissionMin} and a maximum of ${trading.commissionMax.toLocaleString()} per fill.`,
+          'Buying by amount',
+          'Prefer to think in money? Name a dollar amount and the bot buys that much stock at the live price: ' +
+            '`/buy NOVA $50`. The same works on the way out with `/sell NOVA $50`.',
+        ],
+        [
+          'No fees',
+          'There is no commission and no slippage: you pay the share price times the quantity. ' +
+            'Because credits are whole numbers, the total is rounded to the nearest credit in the house\u2019s ' +
+            'favour \u2014 up on a buy, down on a sell \u2014 which caps the round trip at one credit.',
         ],
         [
           'Limit orders',
           'A limit order rests until the market touches your price. It does not guarantee a fill \u2014 it waits for ' +
             `one. Orders expire after ${trading.limitOrderExpiryTicks} ticks, which is about ` +
-            `${Math.floor(trading.limitOrderExpiryTicks / Math.max(1, ticksPerDay()))} trading days. Review them with ` +
+            `${Math.floor(trading.limitOrderExpiryTicks / Math.max(1, ticksPerDay()))} reporting days. Review them with ` +
             '`/orders` and pull them with `/cancel`.',
         ],
         [
@@ -198,8 +203,8 @@ export function guidePages(): GuidePage[] {
         ],
         [
           '4. Place a small trade',
-          '`/buy NOVA 5` spends real money, so start small while you learn how slippage and commission behave. ' +
-            '`/position NOVA` tracks it afterwards.',
+          '`/buy NOVA 5` buys five shares, or `/buy NOVA $25` spends 25 credits. Start small while you learn how ' +
+            'prices move. `/position NOVA` tracks it afterwards.',
         ],
         [
           '5. Automate your discipline',

@@ -74,7 +74,6 @@ test('stock rows expose the tracking fields', async () => {
     'day_low',
     'market_cap',
     'dividend_yield',
-    'halted',
     'sparkline',
   ]) {
     assert.ok(key in row, `missing ${key}`);

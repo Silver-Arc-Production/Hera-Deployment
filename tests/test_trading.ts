@@ -33,8 +33,59 @@ test('buy creates a position and debits the wallet', () => {
   assert.equal(position.quantity, 10);
   approx(position.averageCost, fill.price);
   // Cash is charged in whole credits, rounded up so the house never undercharges.
-  assert.equal(after, before - Math.ceil(fill.gross) - fill.commission);
-  assert.ok(fill.commission >= h.trading.config.commissionMin);
+  assert.equal(after, before - Math.ceil(fill.gross));
+  assert.equal(fill.gross, fill.price * fill.quantity);
+  h.close();
+});
+
+test('buy accepts a fractional quantity', () => {
+  const h = makeHarness();
+  h.fund('1b');
+  const fill = h.trading.buy('1b', GUILD, 'NOVA', 0.5);
+  const position = h.trading.getPosition('1b', GUILD, 'NOVA');
+  assert.ok(position);
+  assert.equal(position.quantity, 0.5);
+  approx(fill.gross, fill.price * 0.5);
+  h.close();
+});
+
+test('buyByValue spends the named amount on shares', () => {
+  const h = makeHarness();
+  h.fund('1c');
+  const company = h.market.getCompany(GUILD, 'NOVA')!;
+  const before = wallet(h, '1c');
+  const fill = h.trading.buyByValue('1c', GUILD, 'NOVA', 500);
+  assert.ok(fill.quantity > 0);
+  // The fill never costs more than the amount named.
+  assert.ok(fill.gross <= 500);
+  assert.ok(wallet(h, '1c') >= before - 500);
+  assert.equal(h.trading.getPosition('1c', GUILD, 'NOVA')!.quantity, fill.quantity);
+  assert.ok(company.price > 0);
+  h.close();
+});
+
+test('sellByValue sells roughly the named amount', () => {
+  const h = makeHarness();
+  h.fund('1d');
+  h.trading.buy('1d', GUILD, 'NOVA', 100);
+  const fill = h.trading.sellByValue('1d', GUILD, 'NOVA', 500);
+  assert.ok(fill.quantity > 0);
+  // Sizing is floored, so the sale never realises more than the amount named.
+  assert.ok(fill.gross <= 500);
+  h.close();
+});
+
+test('buyByValue never overdrafts when asked to spend the whole wallet', () => {
+  const h = makeHarness();
+  // A wallet and price whose quotient does not land on a whole credit exercises
+  // the flooring: rounding the share count up would tip the total over.
+  h.fund('1f', 100_000);
+  const company = h.market.getCompany(GUILD, 'NOVA')!;
+  company.price = 95_387.46885143586;
+  const balance = wallet(h, '1f');
+  const fill = h.trading.buyByValue('1f', GUILD, 'NOVA', balance);
+  assert.ok(fill.gross <= balance);
+  assert.ok(wallet(h, '1f') >= 0);
   h.close();
 });
 
@@ -55,6 +106,18 @@ test('buy accepts a company name', () => {
   const h = makeHarness();
   h.fund('3');
   assert.equal(h.trading.buy('3', GUILD, 'novadyne', 1).symbol, 'NOVA');
+  h.close();
+});
+
+test('a crashed stock is still tradable', () => {
+  const h = makeHarness();
+  h.fund('1e');
+  const company = h.market.getCompany(GUILD, 'NOVA')!;
+  company.previousClose = company.price;
+  company.price *= 0.3; // a violent collapse
+  const fill = h.trading.buy('1e', GUILD, 'NOVA', 2);
+  assert.equal(fill.price, company.price);
+  assert.equal(h.trading.getPosition('1e', GUILD, 'NOVA')!.quantity, 2);
   h.close();
 });
 
@@ -81,13 +144,14 @@ test('buy without funds raises', () => {
   h.close();
 });
 
-test('large orders incur more slippage', () => {
+test('every order fills at the live price regardless of size', () => {
   const h = makeHarness();
   const company = h.market.getCompany(GUILD, 'NOVA')!;
-  const [, small] = h.trading.estimateExecutionPrice(company, 10, 'buy');
-  const [, large] = h.trading.estimateExecutionPrice(company, 500_000, 'buy');
-  assert.ok(large > small);
-  assert.ok(large <= h.trading.config.maxSlippage);
+  const [smallPrice] = h.trading.estimateExecutionPrice(company, 10, 'buy');
+  const [largePrice, largeSlippage] = h.trading.estimateExecutionPrice(company, 500_000, 'buy');
+  assert.equal(largePrice, smallPrice);
+  assert.equal(largeSlippage, 0);
+  assert.equal(smallPrice, company.price);
   h.close();
 });
 
@@ -157,8 +221,8 @@ test('short posts collateral and creates a position', () => {
   assert.ok(short);
   assert.equal(short.quantity, 5);
   assert.ok(short.collateral > 0);
-  // Collateral plus commission leaves the wallet.
-  assert.equal(wallet(h, '20'), before - short.collateral - fill.commission);
+    // Only the collateral leaves the wallet; there is no commission.
+    assert.equal(wallet(h, '20'), before - short.collateral);
   h.close();
 });
 

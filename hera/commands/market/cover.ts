@@ -4,7 +4,7 @@ import { symbolAutocomplete } from '../../framework/autocomplete';
 import { withHeraErrors } from '../../framework/helpers';
 import { symbolArg, stringArg, type CommandDefinition } from '../../framework/types';
 import { HeraError, InsufficientShares } from '../../errors';
-import { price, signed } from '../../formatting';
+import { price, shares, signed } from '../../formatting';
 import { parseAmount } from '../../parsing';
 import { tradeResultEmbed } from '../../ui/embeds';
 
@@ -14,7 +14,7 @@ export const command: CommandDefinition = {
   description: 'Close part or all of a short position.',
   args: [
     symbolArg('symbol', 'Ticker or company name.', symbolAutocomplete(), { required: true }),
-    stringArg('quantity', "How many shares, or 'all'.", { required: true, example: 'all' }),
+    stringArg('quantity', "Shares to cover, or 'all'.", { required: true, example: 'all' }),
   ],
   async execute(ctx, args, services) {
     const requested = String(args.symbol);
@@ -36,7 +36,7 @@ export const command: CommandDefinition = {
           description: fill.message,
           color: fill.realizedPnl >= 0 ? config.embedColor : config.errorColor,
           fields: [
-            ['Shares', fill.quantity.toLocaleString()],
+            ['Shares', shares(fill.quantity)],
             ['Cover price', price(fill.price)],
             ['Realised P/L', signed(fill.realizedPnl)],
           ],

@@ -7,7 +7,7 @@
 import { EmbedBuilder } from 'discord.js';
 
 import { config } from '../config';
-import { arrow, compact, money, percent, price, progressBar, signed } from '../formatting';
+import { arrow, compact, money, percent, price, progressBar, shares, signed } from '../formatting';
 import type { CompanyState, NewsItem } from '../market/engine';
 import type { Portfolio } from '../services/trading';
 import type { AlertRow, OrderRow } from '../services/trading';
@@ -111,15 +111,8 @@ export function listingEmbed(
     embed.addFields({
       name: 'Your position',
       value:
-        `${held.toLocaleString()} shares @ ${price(averageCost)}\n` +
+        `${shares(held)} shares @ ${price(averageCost)}\n` +
         `${signed(pnl)} (${percent(averageCost ? (company.price / averageCost - 1) * 100 : 0)})`,
-      inline: false,
-    });
-  }
-  if (company.haltedUntilTick) {
-    embed.addFields({
-      name: '\u26D4 Trading halted',
-      value: 'A circuit breaker paused this listing after a sharp drop.',
       inline: false,
     });
   }
@@ -192,7 +185,7 @@ export function portfolioEmbed(portfolio: Portfolio, options: { displayName: str
         .slice(0, 10)
         .map(
           (position) =>
-            `${arrow(position.unrealizedPnl)} \`${position.symbol}\` ${position.quantity.toLocaleString()} @ ` +
+            `${arrow(position.unrealizedPnl)} \`${position.symbol}\` ${shares(position.quantity)} @ ` +
             `${price(position.averageCost)} \u2192 ${price(position.price)}  ${signed(position.unrealizedPnl)} ` +
             `(${percent(position.unrealizedPct)})`,
         )
@@ -208,7 +201,7 @@ export function portfolioEmbed(portfolio: Portfolio, options: { displayName: str
         .slice(0, 10)
         .map(
           (short) =>
-            `${arrow(short.unrealizedPnl)} \`${short.symbol}\` short ${short.quantity.toLocaleString()} @ ` +
+            `${arrow(short.unrealizedPnl)} \`${short.symbol}\` short ${shares(short.quantity)} @ ` +
             `${price(short.averagePrice)} \u2192 ${price(short.price)}  ${signed(short.unrealizedPnl)} ` +
             `(${percent(short.unrealizedPct)})`,
         )
@@ -237,9 +230,9 @@ export function orderBookEmbed(rows: OrderRow[], options: { displayName: string 
   }
   for (const row of rows) {
     embed.addFields({
-      name: `#${row.id} \u2022 ${row.side.toUpperCase()} ${Number(row.quantity).toLocaleString()} ${row.symbol}`,
+      name: `#${row.id} \u2022 ${row.side.toUpperCase()} ${shares(Number(row.quantity))} ${row.symbol}`,
       value:
-        `limit ${price(Number(row.limit_price))} \u2022 filled ${Number(row.filled_quantity).toLocaleString()} \u2022 ` +
+        `limit ${price(Number(row.limit_price))} \u2022 filled ${shares(Number(row.filled_quantity))} \u2022 ` +
         `expires tick ${row.expires_tick}`,
       inline: false,
     });

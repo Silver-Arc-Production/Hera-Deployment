@@ -18,6 +18,10 @@
  * 3. **Regime.** A market-wide bull/bear/neutral state scales every company's
  *    move by its beta.
  *
+ * The market never closes and never halts: there are no trading sessions and no
+ * circuit breakers, so a listing can be bought or sold at any time at whatever
+ * the current price happens to be.
+ *
  * Company ``volatility`` and ``drift`` are expressed as *daily* figures and are
  * normalised by the number of ticks in a day, so changing ``STOCK_TICK_SECONDS``
  * does not change the market's character.
@@ -57,7 +61,6 @@ export class CompanyState {
   beta: number;
   sharesOutstanding: number;
   dividendYield: number;
-  haltedUntilTick = 0;
   activeEvent: string | null = null;
   eventTicksLeft = 0;
   eventMagnitude = 0.0;
@@ -93,10 +96,6 @@ export class CompanyState {
     if (this.previousClose === 0) return 0.0;
     return (this.price - this.previousClose) / this.previousClose;
   }
-
-  get isHalted(): boolean {
-    return this.haltedUntilTick > 0;
-  }
 }
 
 export interface NewsItem {
@@ -113,7 +112,6 @@ export class TickResult {
   regime: Regime = 'neutral';
   news: NewsItem[] = [];
   dividends: Record<string, number> = {};
-  halts: string[] = [];
   movers: [string, number][] = [];
 }
 
@@ -199,7 +197,6 @@ export class MarketEngine {
     this.previousIndex = this.indexValue;
     const news: NewsItem[] = [];
     const dividends: Record<string, number> = {};
-    const halts: string[] = [];
 
     this.maybeRotateRegime();
     const sectorEvents = this.maybeSectorEvents(news);
@@ -214,17 +211,6 @@ export class MarketEngine {
         state.dayLow = state.price;
       }
 
-      if (state.haltedUntilTick > this.tick) {
-        // A halted name is frozen: no drift, no event decay.
-        continue;
-      }
-      if (state.haltedUntilTick && state.haltedUntilTick <= this.tick) {
-        state.haltedUntilTick = 0;
-        state.activeEvent = null;
-        state.eventTicksLeft = 0;
-        state.eventMagnitude = 0.0;
-      }
-
       const sectorTemplate = sectorEvents[symbol];
       if (sectorTemplate) {
         state.eventMagnitude += sectorTemplate.magnitude * this.tickScale;
@@ -235,8 +221,7 @@ export class MarketEngine {
       this.maybeStartCompanyEvent(state, news);
       this.maybePayDividend(state, dividends);
 
-      this.movePrice(state, newDay);
-      this.checkCircuitBreaker(state, halts);
+      this.movePrice(state);
     }
 
     this.indexValue = this.computeIndex();
@@ -252,7 +237,6 @@ export class MarketEngine {
     result.regime = this.regime;
     result.news = news;
     result.dividends = dividends;
-    result.halts = halts;
     result.movers = movers;
     return result;
   }
@@ -278,9 +262,7 @@ export class MarketEngine {
     news.push({ symbol: null, headline, impact: template.magnitude, sector });
     const members = Object.values(this.companies).filter((c) => c.sector === sector);
     const events: Record<string, import('./events').EventTemplate> = {};
-    for (const member of members) {
-      if (member.haltedUntilTick <= this.tick) events[member.symbol] = template;
-    }
+    for (const member of members) events[member.symbol] = template;
     return events;
   }
 
@@ -318,7 +300,7 @@ export class MarketEngine {
     state.fairValue = Math.max(this.config.minPrice, state.fairValue - perShare);
   }
 
-  private movePrice(state: CompanyState, _newDay: boolean): void {
+  private movePrice(state: CompanyState): void {
     const perTickVol = state.volatility / Math.sqrt(this.ticksPerDay);
     const perTickDrift = (state.drift * this.driftMultiplier) / this.ticksPerDay;
 
@@ -353,19 +335,9 @@ export class MarketEngine {
       Math.max(this.config.minPrice, state.fairValue),
     );
 
-    if (!state.isHalted) {
+    if (state.price > 0) {
       state.dayHigh = Math.max(state.dayHigh, state.price);
       state.dayLow = Math.min(state.dayLow, state.price);
-    }
-  }
-
-  /** Halt a name after a violent intraday collapse or a single-tick spike. */
-  private checkCircuitBreaker(state: CompanyState, halts: string[]): void {
-    if (state.haltedUntilTick > this.tick) return;
-    const intraday = state.dayChangeFraction;
-    if (intraday <= -this.config.circuitBreakerDrop) {
-      state.haltedUntilTick = this.tick + this.config.haltTicks;
-      halts.push(state.symbol);
     }
   }
 

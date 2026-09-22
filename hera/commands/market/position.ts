@@ -2,7 +2,7 @@
 import { symbolAutocomplete } from '../../framework/autocomplete';
 import { ephemeralError } from '../../framework/helpers';
 import { symbolArg, type CommandDefinition } from '../../framework/types';
-import { percent, price, signed } from '../../formatting';
+import { percent, price, shares, signed } from '../../formatting';
 import { listingEmbed } from '../../ui/embeds';
 
 export const command: CommandDefinition = {
@@ -28,7 +28,7 @@ export const command: CommandDefinition = {
       embed.addFields({
         name: 'Long',
         value:
-          `${longPosition.quantity.toLocaleString()} @ ${price(longPosition.averageCost)}  ` +
+          `${shares(longPosition.quantity)} @ ${price(longPosition.averageCost)}  ` +
           `${signed(longPosition.unrealizedPnl)} (${percent(longPosition.unrealizedPct)})`,
         inline: false,
       });
@@ -37,7 +37,7 @@ export const command: CommandDefinition = {
       embed.addFields({
         name: 'Short',
         value:
-          `${shortPosition.quantity.toLocaleString()} @ ${price(shortPosition.averagePrice)}  ` +
+          `${shares(shortPosition.quantity)} @ ${price(shortPosition.averagePrice)}  ` +
           `${signed(shortPosition.unrealizedPnl)} (${percent(shortPosition.unrealizedPct)})`,
         inline: false,
       });
