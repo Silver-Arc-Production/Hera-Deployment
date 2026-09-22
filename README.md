@@ -72,6 +72,46 @@ Every knob has a sane default and is overridable in `.env`:
 Deeper tuning (volatility, commission, slippage, collateral ratio, event rates)
 lives in `hera/config.py`.
 
+## Deploying to Northflank
+
+The `Dockerfile` builds a self-contained image; no Render-style port binding is
+involved because the bot is a gateway client.
+
+### Build and run locally
+
+```bash
+docker build -t hera-bot .
+docker run --rm -it \
+  -e DISCORD_TOKEN=your-token \
+  -e DISCORD_GUILD_ID=your-server-id \
+  -v hera-data:/data \
+  hera-bot
+```
+
+### On Northflank
+
+1. Create a **service** from this repository and let it build with the
+   `Dockerfile` (Deployment > Build > Dockerfile).
+2. Set the environment variables `DISCORD_TOKEN`, `DISCORD_GUILD_ID` and
+   `STOCK_NEWS_CHANNEL_ID` as secrets. Do not bake them into the image.
+3. **Add a persistent volume mounted at `/data`.** This is the step that matters
+   most: the SQLite file holding every balance and portfolio lives there.
+   Without it the economy resets on every deploy, restart and scale-down.
+
+The mount path and `DATABASE_PATH` must agree. The image already defaults to
+`/data/hera.db`; only override `DATABASE_PATH` if you mount the volume elsewhere
+(and keep it *inside* the mount path).
+
+The image runs as uid/gid `10001`. Northflank assigns volume ownership to the
+group configured in the image, so keep that group unless you also change the
+Dockerfile. If a volume comes back owned by a different group and the bot cannot
+write to `/data`, override the entrypoint with `bin/bash -c` and
+`chown -R 10001:10001 /data && exec python -m hera`.
+
+The container stops gracefully: `hera/__main__.py` installs a `SIGTERM` handler
+that cancels the market ticker and closes the database before exiting. SQLite
+runs in WAL mode, so committed ticks survive even an abrupt kill.
+
 ## Commands
 
 **Market**
@@ -148,6 +188,7 @@ month of ticks across several seeds.
 ```
 hera/
   bot.py            Bot wiring, background ticker, DM dispatch
+  __main__.py       Entrypoint and SIGTERM/SIGINT shutdown handling
   config.py         All tunable settings
   database.py       Schema + async SQLite wrapper
   errors.py         Domain errors mapped to user-facing messages
