@@ -318,7 +318,7 @@ Every game takes a wager, which can be a credit amount or a `$` value.
 | `coinflip <side> <bet>` | Call a coin |
 | `roulette <colour> <bet>` | Back red, black or green |
 | `slots <bet>` | Three-reel machine |
-| `dice <bet> <wager>` | Over, under or exactly seven |
+| `dice <call> <bet>` | Over, under or exactly seven |
 | `rps <move> <bet>` | Rock paper scissors against the house |
 | `plinko <risk> <bet>` | Drop a ball down the peg board |
 | `crash <bet> <target>` | Cash out before the multiplier busts |

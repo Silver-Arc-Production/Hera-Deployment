@@ -8,7 +8,7 @@ export const command: CommandDefinition = {
   category: 'casino',
   description: 'Call a coin in the air.',
   args: [
-    choiceArg('side', 'Heads or tails.', ['heads', 'tails']),
+    choiceArg('side', 'Heads or tails.', ['heads', 'tails'], { required: true }),
     stringArg('bet', 'How much to wager.', { required: true, example: '100' }),
   ],
   async execute(ctx, args, services) {
