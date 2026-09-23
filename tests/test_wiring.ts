@@ -58,6 +58,42 @@ test('every command registers on both front ends', () => {
   }
 });
 
+/**
+ * Discord rejects a command whose optional options precede a required one with
+ * a 50035 Invalid Form Body. The bot syncs commands at startup, and a failure
+ * there throws out of ``start()``, which takes the process down — and the
+ * dashboard with it in the in-process web mode. So this rule is a boot
+ * precondition, not a nicety.
+ */
+test('required options are declared before optional ones', () => {
+  for (const definition of loadAll()) {
+    const options = (buildSlashData(definition).options ?? []) as { name: string; required?: boolean }[];
+    let seenOptional = false;
+    for (const option of options) {
+      if (option.required === true && seenOptional) {
+        assert.fail(
+          `${definition.name}: required option '${option.name}' follows an optional one`,
+        );
+      }
+      if (option.required !== true) seenOptional = true;
+    }
+  }
+});
+
+test('a choice argument with no default is required', () => {
+  // An optional choice falls back to undefined when omitted, which either leaks
+  // the word "undefined" into the result or throws inside the game. Every
+  // casino choice argument picks a side, so all of them must be required.
+  for (const definition of loadAll()) {
+    if (definition.category !== 'casino') continue;
+    for (const arg of definition.args ?? []) {
+      if (arg.choices) {
+        assert.equal(arg.required, true, `${definition.name}: choice '${arg.name}' is optional`);
+      }
+    }
+  }
+});
+
 test('prefix arguments mirror the slash argument list', () => {
   for (const definition of loadAll()) {
     const tokens = (definition.args ?? []).map((arg) => {

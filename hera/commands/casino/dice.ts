@@ -8,12 +8,14 @@ export const command: CommandDefinition = {
   category: 'casino',
   description: 'Roll two dice and bet over, under or exactly seven.',
   args: [
-    choiceArg('bet', 'Over, under or exactly seven.', ['over', 'under', 'seven']),
-    stringArg('wager', 'How much to wager.', { required: true, example: '100' }),
+    choiceArg('call', 'Over, under or exactly seven.', ['over', 'under', 'seven'], {
+      required: true,
+    }),
+    stringArg('bet', 'How much to wager.', { required: true, example: '100' }),
   ],
   async execute(ctx, args, services) {
-    await wager(ctx, services, 'dice', String(args.wager), (amount, rng) =>
-      playDice(rng, amount, args.bet as DiceBet),
+    await wager(ctx, services, 'dice', String(args.bet), (amount, rng) =>
+      playDice(rng, amount, args.call as DiceBet),
     );
   },
 };

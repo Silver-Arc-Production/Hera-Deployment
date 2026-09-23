@@ -118,6 +118,14 @@ Python left in the tree, so do not look for `requirements.txt`, `pytest.ini` or
   weight without rescaling the payouts will move the slot return.
 - `hera/commands/casino/keno.ts` parses its `picks` string itself (space or comma
   separated) and validates before wagering; there is no list argument type.
+- Every casino choice argument is **required**, and required args must be listed
+  before optional ones. Discord rejects a payload where a required option
+  follows an optional one (50035 Invalid Form Body), and because the bot syncs
+  commands during `start()`, that error propagates out of `main()` to
+  `process.exit(1)` — taking the dashboard down with it in in-process web mode.
+  An optional choice is also unsafe on its own: omitting it passes `undefined`
+  into the game, which leaks the word into the result or throws outright.
+  `tests/test_wiring.ts` guards both rules.
 
 ## Conventions
 
