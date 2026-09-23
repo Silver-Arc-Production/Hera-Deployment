@@ -164,6 +164,49 @@ CREATE TABLE IF NOT EXISTS watchlists (
     created_at  REAL NOT NULL DEFAULT (unixepoch('subsec')),
     PRIMARY KEY (user_id, guild_id, symbol)
 );
+
+-- Gambling progression: lifetime winnings gate the table tiers. 'earned'
+-- counts net profit across every game (losses subtract), so a level is a
+-- measure of how much a member has actually won, not how much they wagered.
+CREATE TABLE IF NOT EXISTS gambling_profiles (
+    user_id         TEXT NOT NULL,
+    guild_id        TEXT NOT NULL,
+    earned          INTEGER NOT NULL DEFAULT 0,
+    peak_earned     INTEGER NOT NULL DEFAULT 0,
+    wagered         INTEGER NOT NULL DEFAULT 0,
+    bets            INTEGER NOT NULL DEFAULT 0,
+    wins            INTEGER NOT NULL DEFAULT 0,
+    biggest_win     INTEGER NOT NULL DEFAULT 0,
+    updated_at      REAL NOT NULL DEFAULT (unixepoch('subsec')),
+    PRIMARY KEY (user_id, guild_id)
+);
+CREATE INDEX IF NOT EXISTS idx_gambling_profiles_earned
+    ON gambling_profiles (guild_id, peak_earned DESC);
+
+-- Per-game lifetime stats, mostly for the statistics command.
+CREATE TABLE IF NOT EXISTS gambling_games (
+    user_id     TEXT NOT NULL,
+    guild_id    TEXT NOT NULL,
+    game        TEXT NOT NULL,
+    plays       INTEGER NOT NULL DEFAULT 0,
+    wagered     INTEGER NOT NULL DEFAULT 0,
+    net         INTEGER NOT NULL DEFAULT 0,
+    updated_at  REAL NOT NULL DEFAULT (unixepoch('subsec')),
+    PRIMARY KEY (user_id, guild_id, game)
+);
+
+-- One row per bet, so a member can review their recent wagers by game.
+CREATE TABLE IF NOT EXISTS gambling_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    guild_id    TEXT NOT NULL,
+    game        TEXT NOT NULL,
+    wager       INTEGER NOT NULL,
+    net         INTEGER NOT NULL,
+    created_at  REAL NOT NULL DEFAULT (unixepoch('subsec'))
+);
+CREATE INDEX IF NOT EXISTS idx_gambling_log_user
+    ON gambling_log (user_id, guild_id, id DESC);
 `;
 
 /** Anything the statement binder accepts as a positional parameter. */

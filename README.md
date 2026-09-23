@@ -37,6 +37,14 @@ underneath it — plus a read-only web dashboard.
 - `/work`, `/daily` with a streak bonus, `/pay`, `/rob`, `/deposit`,
   `/withdraw` and a full transaction ledger.
 
+**Casino**
+
+- Eighteen games of chance — from `/coinflip` and `/slots` to `/blackjack`,
+  `/baccarat` and `/hotstreak` — all settling instantly from the wallet.
+- Six table tiers unlocked by peak gambling winnings, each raising the minimum
+  and maximum bet.
+- Per-game totals, a net-winnings ledger and a casino leaderboard.
+
 **Presentation**
 
 - PNG price charts (with your average cost overlaid), multi-stock comparison
@@ -297,6 +305,36 @@ without the sigil. Each is one file: the path in brackets is where it lives.
 `balance [member]`, `work`, `daily`, `deposit`, `withdraw`, `pay`,
 `bankupgrade`, `rob`, `history`, `richest`
 
+**Casino** — `hera/commands/casino/`
+
+Every game takes a wager, which can be a credit amount or a `$` value.
+
+| Command | What it does |
+| --- | --- |
+| `blackjack <bet>` | Play a hand against the dealer |
+| `baccarat <side> <bet>` | Back player, banker or tie |
+| `war <bet>` | Turn a card against the house |
+| `highlow <call> <bet>` | Higher or lower than the next card |
+| `coinflip <side> <bet>` | Call a coin |
+| `roulette <colour> <bet>` | Back red, black or green |
+| `slots <bet>` | Three-reel machine |
+| `dice <bet> <wager>` | Over, under or exactly seven |
+| `rps <move> <bet>` | Rock paper scissors against the house |
+| `plinko <risk> <bet>` | Drop a ball down the peg board |
+| `crash <bet> <target>` | Cash out before the multiplier busts |
+| `wheel <bet>` | Spin the wheel of fortune |
+| `scratchcard <bet>` | Reveal a three-by-three grid |
+| `keno <bet> <picks>` | Mark numbers and see how many fall |
+| `hotstreak <bet> <flips>` | Push your luck on a run of coin flips |
+| `gamblelevels` | The six tiers and your progress |
+| `gambleinfo [member]` | Your record and per-game totals |
+| `gambleleaderboard` | Members ranked by peak winnings |
+
+The table tiers are gated on *peak* net winnings, so a bad run never demotes
+you. Limits start at 10–250 credits on Bronze and reach 10,000–2,000,000 on
+Legend. Every game is tuned to return between 88% and 99% of the stake over a
+long run — there is no strategy that beats the house.
+
 **Admin** — `hera/commands/admin/` (Manage Server)
 
 `tick [count]` advances the market by hand — useful for testing.
@@ -420,7 +458,9 @@ The suite uses `node:test` through `tsx` and covers the price engine (bounds,
 determinism, regimes, dividends, long-run balance), trading
 (fills, fractional shares, dollar-sized orders, weighted average cost, partial
 sells, shorts, collateral, limit-order reservation and refunds, expiry, alerts), the economy (cooldowns, streaks, bank
-capacity, ledger reconciliation), the parsers and formatters, the wiring layer
+capacity, ledger reconciliation), the casino (each game's maths under a scripted
+random, the tier ladder, wager settlement and a long-run house-edge check), the
+parsers and formatters, the wiring layer
 (slash/prefix argument parity, the help directory and its pagination), and the
 web dashboard. The web suite drives real HTTP requests against a live dashboard
 bound to an ephemeral port, checks the SVGs are well-formed, confirms the

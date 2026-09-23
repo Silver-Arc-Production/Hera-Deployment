@@ -58,3 +58,26 @@ export class CooldownActive extends HeraError {
 
 /** Raised when an order request is malformed or not executable. */
 export class InvalidOrder extends HeraError {}
+
+/** Raised when a wager is below the floor of the player's current gambling level. */
+export class BetTooSmall extends HeraError {
+  constructor(
+    public readonly minimum: number,
+    public readonly levelName: string,
+  ) {
+    super(`the ${levelName} table has a minimum bet of ${minimum.toLocaleString()}`);
+  }
+}
+
+/** Raised when a wager exceeds the ceiling of the player's current gambling level. */
+export class BetTooLarge extends HeraError {
+  constructor(
+    public readonly maximum: number,
+    public readonly levelName: string,
+  ) {
+    super(`the ${levelName} table caps bets at ${maximum.toLocaleString()}`);
+  }
+}
+
+/** Raised when a bet request is malformed (non-positive, or not a whole number). */
+export class InvalidBet extends HeraError {}

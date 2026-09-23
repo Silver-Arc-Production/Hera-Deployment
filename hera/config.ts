@@ -46,6 +46,25 @@ export interface TradingConfig {
   shortBorrowFeeRate: number;
 }
 
+/**
+ * A betting tier. ``requiredEarned`` is net lifetime gambling profit the member
+ * must reach before the tier opens; ``minBet``/``maxBet`` bound every wager made
+ * at that tier. Levels are ordered, so a member is always playing at the highest
+ * tier they have unlocked.
+ */
+export interface GambleLevel {
+  index: number;
+  name: string;
+  emoji: string;
+  requiredEarned: number;
+  minBet: number;
+  maxBet: number;
+}
+
+export interface GamblingConfig {
+  levels: GambleLevel[];
+}
+
 export interface WebConfig {
   enabled: boolean;
   host: string;
@@ -68,6 +87,7 @@ export interface BotConfig {
   economy: EconomyConfig;
   market: MarketConfig;
   trading: TradingConfig;
+  gambling: GamblingConfig;
   web: WebConfig;
 }
 
@@ -169,6 +189,23 @@ export const tradingDefaults: TradingConfig = {
   shortBorrowFeeRate: 0.0004,
 };
 
+/**
+ * Betting tiers. ``requiredEarned`` is *net* lifetime gambling profit, so a tier
+ * opens once a member has genuinely won that much at the tables rather than
+ * simply cycling a large bankroll through small bets. The floors and ceilings
+ * are what keep a fresh account from staking its whole wallet on one spin.
+ */
+export const gamblingDefaults: GamblingConfig = {
+  levels: [
+    { index: 0, name: 'Bronze', emoji: '\u{1F949}', requiredEarned: 0, minBet: 10, maxBet: 250 },
+    { index: 1, name: 'Silver', emoji: '\u{1F948}', requiredEarned: 2_000, minBet: 25, maxBet: 2_000 },
+    { index: 2, name: 'Gold', emoji: '\u{1F947}', requiredEarned: 15_000, minBet: 100, maxBet: 10_000 },
+    { index: 3, name: 'Platinum', emoji: '\u{1F48E}', requiredEarned: 75_000, minBet: 500, maxBet: 50_000 },
+    { index: 4, name: 'Diamond', emoji: '\u{1F451}', requiredEarned: 300_000, minBet: 2_500, maxBet: 250_000 },
+    { index: 5, name: 'Legend', emoji: '\u{1F525}', requiredEarned: 1_500_000, minBet: 10_000, maxBet: 2_000_000 },
+  ],
+};
+
 export const config: BotConfig = {
   token: process.env.DISCORD_TOKEN ?? '',
   ownerId: envId(processEnv, 'HERA_OWNER_ID'),
@@ -184,6 +221,7 @@ export const config: BotConfig = {
   economy: economyDefaults,
   market: marketDefaults,
   trading: tradingDefaults,
+  gambling: gamblingDefaults,
   web: resolveWebConfig(processEnv),
 };
 
