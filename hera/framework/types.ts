@@ -7,7 +7,7 @@
  */
 import type { CommandContext } from './context';
 
-export type CommandCategory = 'market' | 'economy' | 'admin' | 'help';
+export type CommandCategory = 'market' | 'economy' | 'casino' | 'admin' | 'help';
 
 export type ArgumentType = 'string' | 'integer' | 'number' | 'user';
 
@@ -42,6 +42,7 @@ export interface CommandServices {
   market: import('../services/market').MarketService;
   trading: import('../services/trading').TradingService;
   economy: import('../services/economy').EconomyService;
+  gambling: import('../gambling/service').GamblingService;
   /** Resolve a cached user's display name, for leaderboards. */
   displayName(userId: string): string;
   /** Advance the market by one tick by hand (admin). */

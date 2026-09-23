@@ -91,6 +91,34 @@ Python left in the tree, so do not look for `requirements.txt`, `pytest.ini` or
 - Format share counts with `shares()` from `hera/formatting.ts`, never
   `toLocaleString()` directly, so fractions render correctly.
 
+## Casino
+
+- Games live in `hera/gambling/games.ts` as **pure functions** over an injected
+  `Random`, each returning a `GameOutcome { payout, win, summary, detail? }`.
+  They do not touch the database; `GamblingService` in `hera/gambling/service.ts`
+  owns level gating, wager settlement and the ledger. Keep it that way — the
+  games are what the tests seed and assert on.
+- The `casino` command category is `hera/commands/casino/`. Game commands are
+  thin: they parse a wager and call `wager()` from `hera/commands/casino/shared.ts`,
+  which validates against the table limits, settles, and renders the result
+  embed. `shared.ts` exports no `command`, so the registry ignores it.
+- Six tiers live in `gamblingDefaults.levels` (`hera/config.ts`). A tier opens on
+  **peak** net winnings (`gambling_profiles.peak_earned`), which only ever rises,
+  so a losing streak never demotes anyone. `requiredEarned` is net profit, not
+  turnover.
+- Every game must keep a house edge. `tests/test_gambling.ts` runs a 200k-round
+  Monte Carlo per game and asserts the return is between 85% and 100% — add new
+  games to that list. Beware pushes that return the full stake: rps and war both
+  needed their win multiplier trimmed below 2x to stay under 100% once ties
+  returned the stake.
+- Payouts go through `credits()` in `games.ts`, which floors to whole credits with
+  a 1e-9 nudge so `100 * 2.3` pays 230 rather than 229. Wagers are whole credits;
+  shares being fractional elsewhere does not apply here.
+- `SLOT_TRIPLE_PAYOUTS` is keyed by the emoji in `SLOT_REELS`; changing a reel
+  weight without rescaling the payouts will move the slot return.
+- `hera/commands/casino/keno.ts` parses its `picks` string itself (space or comma
+  separated) and validates before wagering; there is no list argument type.
+
 ## Conventions
 
 - Style: 2-space indent, single quotes, semicolons, ~100 column lines.

@@ -14,6 +14,7 @@ import { usage } from '../../framework/register';
 /** Cog-equivalent grouping. The order here is the order of the pages. */
 export const CATEGORIES: Record<string, [string, string]> = {
   economy: ['\u{1F4B0} Economy', 'Earning, banking and moving money between members.'],
+  casino: ['\u{1F3B0} Casino', 'Games of chance, wager tiers and the gambling leaderboard.'],
   market: ['\u{1F4C8} Market', 'Quotes, trading, portfolios, alerts and the watchlist.'],
   admin: ['\u{1F527} Admin', 'Operator-only controls for the simulation.'],
   help: ['\u2139\uFE0F Help', 'Finding your way around.'],

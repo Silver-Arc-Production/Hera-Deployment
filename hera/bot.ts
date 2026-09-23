@@ -40,6 +40,7 @@ import type { CommandDefinition, CommandServices } from './framework/types';
 import { EconomyService } from './services/economy';
 import { MarketService } from './services/market';
 import { TradingService } from './services/trading';
+import { GamblingService } from './gambling/service';
 import { errorEmbed } from './ui/embeds';
 import { ViewRegistry } from './ui/views';
 import { registerEvents, type EventContext } from './events';
@@ -57,6 +58,7 @@ export class HeraBot extends Client {
   readonly economy: EconomyService;
   readonly market: MarketService;
   readonly trading: TradingService;
+  readonly gambling: GamblingService;
   readonly commands = new Map<string, CommandDefinition>();
   readonly services: CommandServices;
   readonly ownerId: string | null = config.ownerId;
@@ -93,11 +95,13 @@ export class HeraBot extends Client {
     this.economy = new EconomyService(this.db);
     this.market = new MarketService(this.db, config.market);
     this.trading = new TradingService(this.db, this.economy, this.market, config.trading);
+    this.gambling = new GamblingService(this.db, this.economy, config.gambling);
 
     this.services = {
       market: this.market,
       trading: this.trading,
       economy: this.economy,
+      gambling: this.gambling,
       displayName: (userId) => this.displayNames.get(userId) ?? `User ${userId}`,
       runMarketTick: (guildId) => this.runMarketTick(guildId),
       registerView: (messageId, paginator) => this.views.register(messageId, paginator),
